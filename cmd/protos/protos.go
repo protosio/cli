@@ -15,6 +15,13 @@ func main() {
 		Name:    "protos",
 		Usage:   "Command-line client for Protos",
 		Version: "0.0.0-dev",
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:  "log, l",
+				Value: "info",
+				Usage: "Log level: warn, info, debug",
+			},
+		},
 		Commands: []*cli.Command{
 			{
 				Name:  "init",
