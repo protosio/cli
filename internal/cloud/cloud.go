@@ -22,7 +22,8 @@ type Client interface {
 	DeleteInstance()
 	StartInstance()
 	StopInstance()
-	AddImage()
+	AddImage(url string, hash string) error
+	RemoveImage()
 	AuthFields() []string
 	Init(auth map[string]string) error
 }
