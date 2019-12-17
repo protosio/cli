@@ -12,10 +12,17 @@ import (
 
 func main() {
 	app := &cli.App{
-		Name:  "init",
-		Usage: "Initializes Protos locally and deploys an instance in one of the supported clouds",
-		Action: func(c *cli.Context) error {
-			return protosInit()
+		Name:    "protos",
+		Usage:   "Command-line client for Protos",
+		Version: "0.0.0-dev",
+		Commands: []*cli.Command{
+			{
+				Name:  "init",
+				Usage: "Initializes Protos locally and deploys an instance in one of the supported clouds",
+				Action: func(c *cli.Context) error {
+					return protosInit()
+				},
+			},
 		},
 	}
 
