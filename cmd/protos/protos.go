@@ -132,10 +132,19 @@ func protosInit() error {
 		return err
 	}
 
+	// init cloud client
 	err = client.Init(transformCredentials(cloudCredentials))
 	if err != nil {
 		return err
 	}
+
+	// upload protos image
+	err = client.AddImage("https://releases.protos.io/test/scaleway-efi.iso", "4b49901e65420b55170d95768f431595")
+	if err != nil {
+		return err
+	}
+
+	// deploy a protos instance
 
 	// get user details
 	userDetails := userDetails{}

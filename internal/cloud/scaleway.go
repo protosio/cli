@@ -105,12 +105,20 @@ func (sw *scaleway) getUploadImageID(zone scw.Zone) (string, error) {
 
 func (sw *scaleway) AddImage(url string, hash string) error {
 
+	//
+	// find correct image
+	//
+
 	imageID, err := sw.getUploadImageID(scw.ZoneNlAms1)
 	if err != nil {
 		return errors.Wrap(err, "Failed to add Protos image to Scaleway")
 	}
 
 	log.Infof("Using image '%s' for adding Protos image to Scaleway", imageID)
+
+	//
+	// create upload server
+	//
 
 	ipreq := true
 	req := &instance.CreateServerRequest{
@@ -123,9 +131,66 @@ func (sw *scaleway) AddImage(url string, hash string) error {
 		Image:             imageID,
 	}
 
-	_, err = sw.instanceAPI.CreateServer(req)
+	//
+	// create and start server
+	//
+
+	srvResp, err := sw.instanceAPI.CreateServer(req)
 	if err != nil {
 		return errors.Wrap(err, "Failed to add Protos image to Scaleway")
 	}
+	log.Infof("Created server '%s' (%s)", srvResp.Server.Name, srvResp.Server.ID)
+
+	// default timeout is 5 minutes
+	log.Infof("Starting and waiting for server '%s' (%s)", srvResp.Server.Name, srvResp.Server.ID)
+	startReq := &instance.ServerActionAndWaitRequest{
+		ServerID: srvResp.Server.ID,
+		Zone:     scw.ZoneNlAms1,
+		Action:   instance.ServerActionPoweron,
+	}
+	err = sw.instanceAPI.ServerActionAndWait(startReq)
+	if err != nil {
+		return errors.Wrap(err, "Failed to add Protos image to Scaleway")
+	}
+	log.Infof("Server '%s' (%s) started successfully", srvResp.Server.Name, srvResp.Server.ID)
+
+	//
+	// connect via SSH, download Protos image and write it to a volume
+	//
+
+	srvStatusResp, err := sw.instanceAPI.GetServer(&instance.GetServerRequest{ServerID: srvResp.Server.ID, Zone: scw.ZoneNlAms1})
+	if err != nil {
+		return errors.Wrap(err, "Failed to add Protos image to Scaleway")
+	}
+	log.Info(srvStatusResp.Server.PublicIP)
+	log.Info(srvStatusResp.Server.PrivateIP)
+
+	//
+	// create Protos image from volume snapshot
+	//
+
+	//
+	// power off and delete the server
+	//
+
+	// default timeout is 5 minutes
+	log.Infof("Stopping and waiting for server '%s' (%s)", srvResp.Server.Name, srvResp.Server.ID)
+	stopReq := &instance.ServerActionAndWaitRequest{
+		ServerID: srvResp.Server.ID,
+		Zone:     scw.ZoneNlAms1,
+		Action:   instance.ServerActionPoweroff,
+	}
+	err = sw.instanceAPI.ServerActionAndWait(stopReq)
+	if err != nil {
+		return errors.Wrap(err, "Failed to add Protos image to Scaleway")
+	}
+	log.Infof("Server '%s' (%s) stopped successfully", srvResp.Server.Name, srvResp.Server.ID)
+
+	log.Infof("Deleting server '%s' (%s)", srvResp.Server.Name, srvResp.Server.ID)
+	err = sw.instanceAPI.DeleteServer(&instance.DeleteServerRequest{ServerID: srvResp.Server.ID, Zone: scw.ZoneNlAms1})
+	if err != nil {
+		return errors.Wrap(err, "Failed to add Protos image to Scaleway")
+	}
+
 	return nil
 }
