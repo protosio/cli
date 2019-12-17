@@ -11,6 +11,11 @@ const (
 	Scaleway = "scaleway"
 )
 
+// SupportedProviders returns a list of supported cloud providers
+func SupportedProviders() []string {
+	return []string{Scaleway}
+}
+
 // Client allows interactions with cloud instances and images
 type Client interface {
 	NewInstance()
@@ -18,6 +23,8 @@ type Client interface {
 	StartInstance()
 	StopInstance()
 	AddImage()
+	AuthFields() []string
+	Init(auth map[string]string) error
 }
 
 // NewClient creates a new cloud provider client
@@ -30,7 +37,7 @@ func NewClient(cloud string) (Client, error) {
 	case Scaleway:
 		client, err = newScalewayClient()
 	default:
-		return nil, errors.Errorf("Cloud '%s' not supported", cloud)
+		err = errors.Errorf("Cloud '%s' not supported", cloud)
 	}
 	if err != nil {
 		return nil, err
