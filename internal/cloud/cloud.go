@@ -51,22 +51,3 @@ func NewClient(cloud string) (Client, error) {
 	}
 	return client, nil
 }
-
-func generateSSHkey() ([]byte, string, error) {
-	pubKey, privKey, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		return nil, "", errors.Wrap(err, "Failed to generate SSH key")
-	}
-	publicKey, err := ssh.NewPublicKey(pubKey)
-	if err != nil {
-		return nil, "", errors.Wrap(err, "Failed to generate SSH key")
-	}
-
-	pemKey := &pem.Block{
-		Type:  "OPENSSH PRIVATE KEY",
-		Bytes: edkey.MarshalED25519PrivateKey(privKey),
-	}
-	privateKey := pem.EncodeToMemory(pemKey)
-	authorizedKey := ssh.MarshalAuthorizedKey(publicKey)
-	return privateKey, string(authorizedKey), nil
-}

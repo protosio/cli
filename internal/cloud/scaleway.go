@@ -5,13 +5,13 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	lssh "github.com/protosio/cli/internal/ssh"
 	account "github.com/scaleway/scaleway-sdk-go/api/account/v2alpha1"
 	"github.com/scaleway/scaleway-sdk-go/api/instance/v1"
 	"github.com/scaleway/scaleway-sdk-go/api/marketplace/v1"
 	"github.com/scaleway/scaleway-sdk-go/scw"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ssh"
-	// "github.com/sirupsen/logrus"
 )
 
 const (
@@ -114,7 +114,7 @@ func (sw *scaleway) AddImage(url string, hash string) error {
 	// create and add ssh key to account
 	//
 
-	privKey, pubKey, err := generateSSHkey()
+	privKey, pubKey, err := lssh.GenerateKey()
 	if err != nil {
 		return errors.Wrap(err, "Failed to add Protos image to Scaleway")
 	}
@@ -187,20 +187,20 @@ func (sw *scaleway) AddImage(url string, hash string) error {
 	//
 
 	log.Info("Downloading Protos image")
-	out, err := executeSSHCommand("wget -P /tmp https://releases.protos.io/test/scaleway-efi.iso", client)
+	out, err := lssh.ExecuteCommand("wget -P /tmp https://releases.protos.io/test/scaleway-efi.iso", client)
 	if err != nil {
 		log.Errorf("Error downloading Protos VM image: %s", out)
 		return errors.Wrap(err, "Failed to add Protos image to Scaleway. Error downloading Protos VM image")
 	}
 
-	out, err = executeSSHCommand("ls /dev/vdb", client)
+	out, err = lssh.ExecuteCommand("ls /dev/vdb", client)
 	if err != nil {
 		log.Errorf("Snapshot volume not found: %s", out)
 		return errors.Wrap(err, "Failed to add Protos image to Scaleway. Snapshot volume not found")
 	}
 
 	log.Info("Writing Protos image to volume")
-	out, err = executeSSHCommand("dd if=/tmp/scaleway-efi.iso of=/dev/vdb", client)
+	out, err = lssh.ExecuteCommand("dd if=/tmp/scaleway-efi.iso of=/dev/vdb", client)
 	if err != nil {
 		log.Errorf("Error while writing image to volume: %s", out)
 		return errors.Wrap(err, "Failed to add Protos image to Scaleway. Error while writing image to volume")
@@ -259,35 +259,6 @@ func (sw *scaleway) AddImage(url string, hash string) error {
 	}
 
 	return nil
-}
-
-func executeSSHCommand(cmd string, client *ssh.Client) (string, error) {
-	session, err := client.NewSession()
-	if err != nil {
-		return "", errors.Wrap(err, "Failed to create new sessions")
-	}
-
-	modes := ssh.TerminalModes{
-		ssh.ECHO:          0,
-		ssh.TTY_OP_ISPEED: 14400,
-		ssh.TTY_OP_OSPEED: 14400,
-	}
-
-	if err := session.RequestPty("xterm", 80, 40, modes); err != nil {
-		session.Close()
-		return "", errors.Wrap(err, "Request for pseudo terminal failed")
-	}
-
-	log.Infof("Executing (SSH) command '%s'", cmd)
-	output, err := session.CombinedOutput(cmd)
-	if err != nil {
-		return string(output), errors.Wrapf(err, "Failed to execute command '%s'", cmd)
-	}
-
-	session.Close()
-
-	return string(output), nil
-
 }
 
 func (sw *scaleway) cleanImageSSHkeys(keyID string) {
