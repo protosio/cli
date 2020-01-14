@@ -1,13 +1,7 @@
 package cloud
 
 import (
-	"crypto/rand"
-	"encoding/pem"
-
-	"github.com/mikesmitty/edkey"
 	"github.com/pkg/errors"
-	"golang.org/x/crypto/ed25519"
-	"golang.org/x/crypto/ssh"
 )
 
 const (
@@ -24,12 +18,15 @@ func SupportedProviders() []string {
 
 // Client allows interactions with cloud instances and images
 type Client interface {
-	NewInstance()
-	DeleteInstance()
-	StartInstance()
-	StopInstance()
-	AddImage(url string, hash string) error
-	RemoveImage()
+	NewInstance(name string, image string, pubKey string) (string, error)
+	DeleteInstance(id string) error
+	StartInstance(id string) error
+	StopInstance(id string) error
+	GetImages() (map[string]string, error)
+	AddImage(url string, hash string) (string, error)
+	RemoveImage(name string) error
+	NewVolume() (string, error)
+	DeleteVolume(id string) error
 	AuthFields() []string
 	Init(auth map[string]string) error
 }
@@ -39,8 +36,8 @@ func NewClient(cloud string) (Client, error) {
 	var client Client
 	var err error
 	switch cloud {
-	case DigitalOcean:
-		client, err = newDigitalOceanClient()
+	// case DigitalOcean:
+	// 	client, err = newDigitalOceanClient()
 	case Scaleway:
 		client, err = newScalewayClient()
 	default:
