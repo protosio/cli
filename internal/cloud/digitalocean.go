@@ -8,14 +8,29 @@ func newDigitalOceanClient() (*digitalocean, error) {
 
 }
 
-func (do *digitalocean) NewInstance()    {}
-func (do *digitalocean) DeleteInstance() {}
-func (do *digitalocean) StartInstance()  {}
-func (do *digitalocean) StopInstance()   {}
+func (do *digitalocean) NewInstance(image string) (string, error) {
+	return "", nil
+}
+
+func (do *digitalocean) DeleteInstance(id string) error {
+	return nil
+}
+
+func (do *digitalocean) StartInstance(id string) error {
+	return nil
+}
+
+func (do *digitalocean) StopInstance(id string) error {
+	return nil
+}
+
 func (do *digitalocean) AddImage(url string, hash string) error {
 	return nil
 }
-func (do *digitalocean) RemoveImage() {}
+
+func (do *digitalocean) RemoveImage(id string) error {
+	return nil
+}
 
 func (do *digitalocean) AuthFields() []string {
 	return []string{}
