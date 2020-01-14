@@ -284,29 +284,11 @@ func (sw *scaleway) AddImage(url string, hash string) (string, error) {
 	// connect via SSH, download Protos image and write it to a volume
 	//
 
-	sshConfig := &ssh.ClientConfig{
-		User: "root",
-		Auth: []ssh.AuthMethod{
-			key.SSHAuth(),
-		},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // TODO validate server before?
-	}
-
 	log.Info("Trying to connect to Scaleway upload instance over SSH")
-	var client *ssh.Client
-	tries := 0
-	for {
-		tries++
-		if tries > 20 {
-			return "", errors.New("Failed to add Protos image to Scaleway. Max retries reached while trying to SSH into the upload server")
-		}
-		client, err = ssh.Dial("tcp", srv.PublicIP.Address.String()+":22", sshConfig) // TODO remove hardocoded port?
-		if err != nil {
-			log.Infof("Instance not available yet. Waiting 5 seconds... : %s", err.Error())
-			time.Sleep(5 * time.Second)
-		} else {
-			break
-		}
+
+	client, err := lssh.NewConnection(srv.PublicIP.Address.String(), "root", key.SSHAuth(), 10)
+	if err != nil {
+		return "", errors.Wrap(err, "Failed to add Protos image to Scaleway. Failed to deploy VM to Scaleway")
 	}
 	log.Info("SSH connection initiated")
 
