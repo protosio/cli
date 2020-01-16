@@ -1,6 +1,7 @@
 package ssh
 
 import (
+	"fmt"
 	"io"
 	"net"
 	"strings"
@@ -21,6 +22,37 @@ type Tunnel struct {
 	target    string
 	log       *logrus.Logger
 	connMap   []chan interface{}
+}
+
+func connCopy(w io.Writer, r io.ReadCloser, cancel <-chan bool, log *logrus.Logger) {
+	errChan := make(chan error)
+
+	// Execute the io.Copy asynchronously so we can wait for cancel events
+	go func() {
+		defer func() {
+			// Catch panic and convert to a normal error
+			if err := recover(); err != nil {
+				errChan <- fmt.Errorf("%s", err)
+			}
+		}()
+		_, err := io.Copy(w, r)
+		select {
+		case errChan <- err:
+		default:
+		}
+		close(errChan)
+	}()
+
+	// Wait for the client to close the connection
+	select {
+	case err := <-errChan:
+		if err != nil {
+			log.Errorf("Failed to copy data over SSH tunnel: %s", err.Error())
+		}
+		return
+	case <-cancel:
+		return
+	}
 }
 
 // Start initiates the ssh tunnel
@@ -92,16 +124,15 @@ func (t *Tunnel) forward(localConn net.Conn, sshConn *ssh.Client, close chan int
 		t.log.Errorf("Failed to establish remote connection (%s) over SSH tunnel (%s): %s", t.target, t.sshHost, err)
 		return
 	}
-	copyConn := func(writer, reader net.Conn) {
-		_, err := io.Copy(writer, reader)
-		if err != nil {
-			t.log.Errorf("Failed to copy data over SSH tunnel (%s): %s", t.sshHost, err)
-		}
-	}
-	go copyConn(localConn, remoteConn)
-	go copyConn(remoteConn, localConn)
+
+	cancel1 := make(chan bool, 1)
+	cancel2 := make(chan bool, 1)
+	go connCopy(localConn, remoteConn, cancel1, t.log)
+	go connCopy(remoteConn, localConn, cancel2, t.log)
 	<-close
 	t.log.Debug("Close signal received, stopping forwarder")
+	cancel1 <- true
+	cancel2 <- true
 	_ = localConn.Close()
 	_ = remoteConn.Close()
 }
