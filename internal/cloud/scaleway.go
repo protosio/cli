@@ -40,23 +40,6 @@ func newScalewayClient() (*scaleway, error) {
 
 // NewInstance created a new Protos instance on Scaleway
 func (sw *scaleway) NewInstance(name string, imageID string, pubKey string) (string, error) {
-	//
-	// create volume
-	//
-
-	// size := scw.Size(uint64(10000000000))
-	// createVolumeReq := &instance.CreateVolumeRequest{
-	// 	Name:       "protos-image-uploader",
-	// 	VolumeType: "l_ssd",
-	// 	Size:       &size,
-	// 	Zone:       scw.ZoneNlAms1,
-	// }
-
-	// log.Info("Creating Protos data volume")
-	// volumeResp, err := sw.instanceAPI.CreateVolume(createVolumeReq)
-	// if err != nil {
-	// 	return "", errors.Wrap(err, "Failed to create Protos data volume")
-	// }
 
 	//
 	// create SSH key
@@ -64,11 +47,11 @@ func (sw *scaleway) NewInstance(name string, imageID string, pubKey string) (str
 
 	keysResp, err := sw.accountAPI.ListSSHKeys(&account.ListSSHKeysRequest{})
 	if err != nil {
-		return "", errors.Wrap(err, "Failed to add Protos image to Scaleway: Failed to get SSH keys")
+		return "", errors.Wrap(err, "Failed to get SSH keys")
 	}
 	for _, k := range keysResp.SSHKeys {
-		log.Info("- ", k.Name, ", ", k.ID, ", ", k.OrganizationID)
 		if k.Name == name {
+			log.Infof("Found and SSH key with the name of the instance (%s). Deleting it and creating a new key for the current instance.", name)
 			sw.accountAPI.DeleteSSHKey(&account.DeleteSSHKeyRequest{SSHKeyID: k.ID})
 		}
 	}
@@ -76,19 +59,26 @@ func (sw *scaleway) NewInstance(name string, imageID string, pubKey string) (str
 	pubKey = strings.TrimSuffix(pubKey, "\n") + " root@protos.io"
 	_, err = sw.accountAPI.CreateSSHKey(&account.CreateSSHKeyRequest{Name: name, OrganizationID: sw.credentials.organisationID, PublicKey: pubKey})
 	if err != nil {
-		return "", errors.Wrap(err, "Failed to add Protos image to Scaleway: Failed to add temporary SSH key")
+		return "", errors.Wrap(err, "Failed to add SSH key for instance")
 	}
 
 	//
 	// create server
 	//
 
-	volumeMap := make(map[string]*instance.VolumeTemplate)
-	// volumeTemplate := &instance.VolumeTemplate{
-	// 	Size: scw.Size(uint64(10000000000)),
-	// }
-	// volumeMap["0"] = volumeTemplate
+	// checking if there is a server with the same name
+	serversResp, err := sw.instanceAPI.ListServers(&instance.ListServersRequest{Zone: scw.ZoneNlAms1})
+	if err != nil {
+		return "", errors.Wrap(err, "Failed to retrieve servers")
+	}
+	for _, srv := range serversResp.Servers {
+		if srv.Name == name {
+			return "", errors.Errorf("There is already an instance with name '%s' on Scaleway, in zone '%s'", name, scw.ZoneNlAms1)
+		}
+	}
 
+	// deploying the instance
+	volumeMap := make(map[string]*instance.VolumeTemplate)
 	log.Infof("Deploing VM using image '%s'", imageID)
 	ipreq := true
 	req := &instance.CreateServerRequest{
@@ -107,22 +97,6 @@ func (sw *scaleway) NewInstance(name string, imageID string, pubKey string) (str
 		return "", errors.Wrap(err, "Failed to create VM")
 	}
 	log.Infof("Created server '%s' (%s)", srvResp.Server.Name, srvResp.Server.ID)
-
-	//
-	// attach volume
-	//
-
-	// log.Info("Attaching snapshot volume to upload VM")
-	// attachVolumeReq := &instance.AttachVolumeRequest{
-	// 	ServerID: srvResp.Server.ID,
-	// 	VolumeID: volumeResp.Volume.ID,
-	// 	Zone:     scw.ZoneNlAms1,
-	// }
-
-	// _, err = sw.instanceAPI.AttachVolume(attachVolumeReq)
-	// if err != nil {
-	// 	return "", errors.Wrap(err, "Failed to attach volume to upload VM")
-	// }
 
 	//
 	// start server

@@ -192,7 +192,7 @@ func protosInit() error {
 	log.Infof("Deploying Protos instance '%s' using image '%s'", vmName, imageID)
 	vmIP, err := client.NewInstance(vmName, imageID, key.Public())
 	if err != nil {
-		return errors.Wrap(err, "Failed to initialize Protos")
+		return errors.Wrap(err, "Failed to deploy Protos instance")
 	}
 
 	// log.Info(key.EncodePrivateKeytoPEM())
