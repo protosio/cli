@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"os/signal"
 	"os/user"
@@ -17,15 +16,18 @@ import (
 )
 
 func main() {
+	log := logrus.New()
+	var loglevel string
 	app := &cli.App{
 		Name:    "protos",
 		Usage:   "Command-line client for Protos",
 		Version: "0.0.0-dev",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
-				Name:  "log, l",
-				Value: "info",
-				Usage: "Log level: warn, info, debug",
+				Name:        "log, l",
+				Value:       "info",
+				Usage:       "Log level: warn, info, debug",
+				Destination: &loglevel,
 			},
 		},
 		Commands: []*cli.Command{
@@ -33,10 +35,19 @@ func main() {
 				Name:  "init",
 				Usage: "Initializes Protos locally and deploys an instance in one of the supported clouds",
 				Action: func(c *cli.Context) error {
-					return protosInit()
+					return protosInit(log)
 				},
 			},
 		},
+	}
+
+	app.Before = func(c *cli.Context) error {
+		level, err := logrus.ParseLevel(loglevel)
+		if err != nil {
+			return err
+		}
+		log.SetLevel(level)
+		return nil
 	}
 
 	err := app.Run(os.Args)
@@ -121,10 +132,7 @@ func catchSignals(sigs chan os.Signal, quit chan interface{}) {
 	quit <- true
 }
 
-func protosInit() error {
-
-	log := logrus.New()
-	log.SetLevel(logrus.DebugLevel)
+func protosInit(log *logrus.Logger) error {
 
 	// create config and state directory
 	usr, _ := user.Current()
