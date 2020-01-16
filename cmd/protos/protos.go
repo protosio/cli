@@ -195,34 +195,35 @@ func protosInit() error {
 		return errors.Wrap(err, "Failed to deploy Protos instance")
 	}
 
-	// log.Info(key.EncodePrivateKeytoPEM())
-
 	// test SSH and create SSH tunnel used for initialisation
 	tempClient, err := ssh.NewConnection(vmIP, "root", key.SSHAuth(), 10)
 	if err != nil {
 		return errors.Wrap(err, "Failed to initialize Protos")
 	}
 	tempClient.Close()
-	log.Info("Instance is ready")
+	log.Info("Instance is ready and accepting SSH connections")
 
 	log.Infof("Creating SSH tunnel to the new VM, using ip '%s'", vmIP)
 	tunnel := ssh.NewTunnel(vmIP+":22", "root", key.SSHAuth(), "localhost:8080", log)
 	localPort, err := tunnel.Start()
 	if err != nil {
-		return errors.Wrap(err, "Failed to initialize Protos")
+		return errors.Wrap(err, "Error while creating the SSH tunnel")
 	}
-	log.Infof("Please do the setup using a browser at 'http://localhost:%d/'. Once finished, press CTRL+C to continue", localPort)
 
 	quit := make(chan interface{}, 1)
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 	go catchSignals(sigs, quit)
+
+	log.Infof("SSH tunnel ready. Please do the setup using a browser at 'http://localhost:%d/'. Once finished, press CTRL+C to continue", localPort)
+
+	// waiting for a SIGTERM or SIGINT
 	<-quit
 
-	log.Info("CTRL+C received. Shutting down SSH tunnel")
+	log.Info("CTRL+C received. Shutting down the SSH tunnel")
 	err = tunnel.Close()
 	if err != nil {
-		return errors.Wrap(err, "Failed to initialize Protos")
+		return errors.Wrap(err, "Error while terminating the SSH tunnel")
 	}
 	log.Info("SSH tunnel terminated successfully")
 	log.Infof("Protos instance '%s' - '%s' deployed successfully", vmName, vmIP)
