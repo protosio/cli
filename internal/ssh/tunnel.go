@@ -48,7 +48,6 @@ func (t *Tunnel) Start() (int, error) {
 
 	// accept local connections and start the forwarding
 	go func() {
-		t.log.Info("Waiting for local connections to forward via the SSH tunnel")
 		for {
 			localConn, err := t.listener.Accept()
 			if err != nil {

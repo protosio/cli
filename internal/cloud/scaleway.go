@@ -51,7 +51,7 @@ func (sw *scaleway) NewInstance(name string, imageID string, pubKey string) (str
 	}
 	for _, k := range keysResp.SSHKeys {
 		if k.Name == name {
-			log.Infof("Found and SSH key with the name of the instance (%s). Deleting it and creating a new key for the current instance.", name)
+			log.Infof("Found an SSH key with the same name as the instance (%s). Deleting it and creating a new key for the current instance.", name)
 			sw.accountAPI.DeleteSSHKey(&account.DeleteSSHKeyRequest{SSHKeyID: k.ID})
 		}
 	}
@@ -64,7 +64,6 @@ func (sw *scaleway) NewInstance(name string, imageID string, pubKey string) (str
 
 	//
 	// create server
-	//
 
 	// checking if there is a server with the same name
 	serversResp, err := sw.instanceAPI.ListServers(&instance.ListServersRequest{Zone: scw.ZoneNlAms1})
@@ -113,7 +112,7 @@ func (sw *scaleway) NewInstance(name string, imageID string, pubKey string) (str
 	if err != nil {
 		return "", errors.Wrap(err, "Failed to start upload server")
 	}
-	log.Infof("Server '%s' (%s) started successfully", srvResp.Server.Name, srvResp.Server.ID)
+	log.Infof("Instance '%s' (%s) started successfully", srvResp.Server.Name, srvResp.Server.ID)
 
 	//
 	// refresh IP info
