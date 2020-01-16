@@ -2,16 +2,14 @@ package cloud
 
 import (
 	"strings"
-	"time"
 
 	"github.com/pkg/errors"
-	lssh "github.com/protosio/cli/internal/ssh"
+	"github.com/protosio/cli/internal/ssh"
 	account "github.com/scaleway/scaleway-sdk-go/api/account/v2alpha1"
 	"github.com/scaleway/scaleway-sdk-go/api/instance/v1"
 	"github.com/scaleway/scaleway-sdk-go/api/marketplace/v1"
 	"github.com/scaleway/scaleway-sdk-go/scw"
 	log "github.com/sirupsen/logrus"
-	"golang.org/x/crypto/ssh"
 )
 
 const (
@@ -247,7 +245,7 @@ func (sw *scaleway) AddImage(url string, hash string) (string, error) {
 	// create and add ssh key to account
 	//
 
-	key, err := lssh.GenerateKey()
+	key, err := ssh.GenerateKey()
 	if err != nil {
 		return "", errors.Wrap(err, "Failed to add Protos image to Scaleway")
 	}
@@ -286,7 +284,7 @@ func (sw *scaleway) AddImage(url string, hash string) (string, error) {
 
 	log.Info("Trying to connect to Scaleway upload instance over SSH")
 
-	client, err := lssh.NewConnection(srv.PublicIP.Address.String(), "root", key.SSHAuth(), 10)
+	sshClient, err := ssh.NewConnection(srv.PublicIP.Address.String(), "root", key.SSHAuth(), 10)
 	if err != nil {
 		return "", errors.Wrap(err, "Failed to add Protos image to Scaleway. Failed to deploy VM to Scaleway")
 	}
@@ -297,20 +295,20 @@ func (sw *scaleway) AddImage(url string, hash string) (string, error) {
 	//
 
 	log.Info("Downloading Protos image")
-	out, err := lssh.ExecuteCommand("wget -P /tmp https://releases.protos.io/test/scaleway-efi.iso", client)
+	out, err := ssh.ExecuteCommand("wget -P /tmp https://releases.protos.io/test/scaleway-efi.iso", sshClient)
 	if err != nil {
 		log.Errorf("Error downloading Protos VM image: %s", out)
 		return "", errors.Wrap(err, "Failed to add Protos image to Scaleway. Error downloading Protos VM image")
 	}
 
-	out, err = lssh.ExecuteCommand("ls /dev/vdb", client)
+	out, err = ssh.ExecuteCommand("ls /dev/vdb", sshClient)
 	if err != nil {
 		log.Errorf("Snapshot volume not found: %s", out)
 		return "", errors.Wrap(err, "Failed to add Protos image to Scaleway. Snapshot volume not found")
 	}
 
 	log.Info("Writing Protos image to volume")
-	out, err = lssh.ExecuteCommand("dd if=/tmp/scaleway-efi.iso of=/dev/vdb", client)
+	out, err = ssh.ExecuteCommand("dd if=/tmp/scaleway-efi.iso of=/dev/vdb", sshClient)
 	if err != nil {
 		log.Errorf("Error while writing image to volume: %s", out)
 		return "", errors.Wrap(err, "Failed to add Protos image to Scaleway. Error while writing image to volume")
