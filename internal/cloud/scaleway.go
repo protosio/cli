@@ -292,11 +292,31 @@ func (sw *scaleway) RemoveImage(id string) error {
 	return nil
 }
 
-func (sw *scaleway) NewVolume() (string, error) {
-	return "", nil
+func (sw *scaleway) NewVolume(name string, size int) (string, error) {
+	sizeVolume := scw.Size(uint64(size * 1048576))
+	createVolumeReq := &instance.CreateVolumeRequest{
+		Name:       name,
+		VolumeType: "b_ssd",
+		Size:       &sizeVolume,
+		Zone:       sw.location,
+	}
+
+	volumeResp, err := sw.instanceAPI.CreateVolume(createVolumeReq)
+	if err != nil {
+		return "", errors.Wrap(err, "Failed to create Scaleway volume")
+	}
+	return volumeResp.Volume.ID, nil
 }
 
 func (sw *scaleway) DeleteVolume(id string) error {
+	deleteVolumeReq := &instance.DeleteVolumeRequest{
+		VolumeID: id,
+		Zone:     sw.location,
+	}
+	err := sw.instanceAPI.DeleteVolume(deleteVolumeReq)
+	if err != nil {
+		return errors.Wrapf(err, "Failed to delete Scaleway volume '%s'", id)
+	}
 	return nil
 }
 
