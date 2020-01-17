@@ -215,8 +215,6 @@ func protosInit(log *logrus.Logger) error {
 		return errors.Wrap(err, "Failed to initialize Protos")
 	}
 
-	// create protos data volume
-
 	// deploy a protos instance
 	vmName := "protos1"
 	log.Infof("Deploying Protos instance '%s' using image '%s'", vmName, imageID)
@@ -226,7 +224,21 @@ func protosInit(log *logrus.Logger) error {
 	}
 	log.Infof("Instance with ID '%s' deployed", vmID)
 
+	// create protos data volume
+	log.Infof("Creating data volume for Protos instance '%s'", vmName)
+	volumeID, err := client.NewVolume(vmName, 30000)
+	if err != nil {
+		return errors.Wrap(err, "Failed to create data volume")
+	}
+
+	// attach volume to instance
+	err = client.AttachVolume(volumeID, vmID)
+	if err != nil {
+		return errors.Wrapf(err, "Failed to attach volume to instance '%s'", vmName)
+	}
+
 	// start protos instance
+	log.Infof("Starting Protos instance '%s'", vmName)
 	err = client.StartInstance(vmID)
 	if err != nil {
 		return errors.Wrap(err, "Failed to start Protos instance")

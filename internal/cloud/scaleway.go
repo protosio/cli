@@ -388,10 +388,27 @@ func (sw *scaleway) DeleteVolume(id string) error {
 }
 
 func (sw *scaleway) AttachVolume(volumeID string, instanceID string) error {
+	attachVolumeReq := &instance.AttachVolumeRequest{
+		Zone:     sw.location,
+		VolumeID: volumeID,
+		ServerID: instanceID,
+	}
+	_, err := sw.instanceAPI.AttachVolume(attachVolumeReq)
+	if err != nil {
+		return errors.Wrapf(err, "Failed to attach Scaleway volume '%s' to instance '%s'", volumeID, instanceID)
+	}
 	return nil
 }
 
 func (sw *scaleway) DettachVolume(volumeID string, instanceID string) error {
+	detachVolumeReq := &instance.DetachVolumeRequest{
+		Zone:     sw.location,
+		VolumeID: volumeID,
+	}
+	_, err := sw.instanceAPI.DetachVolume(detachVolumeReq)
+	if err != nil {
+		return errors.Wrapf(err, "Failed to detach Scaleway volume '%s' from instance '%s'", volumeID, instanceID)
+	}
 	return nil
 }
 
