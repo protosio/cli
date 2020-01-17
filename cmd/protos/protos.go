@@ -108,6 +108,13 @@ func getCloudProviderSelect(cloudProviders []string) *survey.Select {
 	}
 }
 
+func getCloudProviderLocationSelect(providerName string, cloudProviderLocations []string) *survey.Select {
+	return &survey.Select{
+		Message: fmt.Sprintf("Choose one of the following supported locations supported for '%s':", providerName),
+		Options: cloudProviderLocations,
+	}
+}
+
 func getCloudCredentialsQuestions(providerName string, fields []string) []*survey.Question {
 	qs := []*survey.Question{}
 	for _, field := range fields {
@@ -148,23 +155,38 @@ func protosInit(log *logrus.Logger) error {
 	cloudProviders := cloud.SupportedProviders()
 	cloudProviderSelect := getCloudProviderSelect(cloudProviders)
 
-	survey.AskOne(cloudProviderSelect, &cloudProvider)
+	err = survey.AskOne(cloudProviderSelect, &cloudProvider)
+	if err != nil {
+		return err
+	}
+
+	client, err := cloud.NewClient(cloudProvider)
+	if err != nil {
+		return err
+	}
 
 	// get cloud provider credentials
-	client, err := cloud.NewClient(cloudProvider)
-
-	credFields := client.AuthFields()
-
-	credentialsQuestions := getCloudCredentialsQuestions(cloudProvider, credFields)
 	cloudCredentials := map[string]interface{}{}
+	credFields := client.AuthFields()
+	credentialsQuestions := getCloudCredentialsQuestions(cloudProvider, credFields)
 
 	err = survey.Ask(credentialsQuestions, &cloudCredentials)
 	if err != nil {
 		return err
 	}
 
+	// get cloud provider location
+	var cloudLocation string
+	supportedLocations := client.SupportedLocations()
+	cloudLocationQuestions := getCloudProviderLocationSelect(cloudProvider, supportedLocations)
+
+	err = survey.AskOne(cloudLocationQuestions, &cloudLocation)
+	if err != nil {
+		return err
+	}
+
 	// init cloud client
-	err = client.Init(transformCredentials(cloudCredentials))
+	err = client.Init(transformCredentials(cloudCredentials), cloudLocation)
 	if err != nil {
 		return err
 	}

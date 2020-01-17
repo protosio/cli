@@ -26,20 +26,26 @@ type InstanceInfo struct {
 
 // Client allows interactions with cloud instances and images
 type Client interface {
+	// Config methods
+	AuthFields() (fields []string)                      // returns the fields that are required to authenticate for a specific cloud provider
+	SupportedLocations() (locations []string)           // returns the supported locations for a specific cloud provider
+	Init(auth map[string]string, location string) error // a cloud provider always needs to have Init called to configure it
+	// Instance methods
 	NewInstance(name string, image string, pubKey string) (id string, err error)
 	DeleteInstance(id string) error
 	StartInstance(id string) error
 	StopInstance(id string) error
 	GetInstanceInfo(id string) (InstanceInfo, error)
+	// Image methods
 	GetImages() (images map[string]string, err error)
 	AddImage(url string, hash string) (id string, err error)
 	RemoveImage(name string) error
-	NewVolume() (id string, err error)
+	// Volume methods
+	// - size should by provided in megabytes
+	NewVolume(name string, size int) (id string, err error)
 	DeleteVolume(id string) error
 	AttachVolume(volumeID string, instanceID string) error
 	DettachVolume(volumeID string, instanceID string) error
-	AuthFields() (fields []string)
-	Init(auth map[string]string) error
 }
 
 // NewClient creates a new cloud provider client
@@ -50,7 +56,7 @@ func NewClient(cloud string) (Client, error) {
 	// case DigitalOcean:
 	// 	client, err = newDigitalOceanClient()
 	case Scaleway:
-		client, err = newScalewayClient()
+		client = newScalewayClient()
 	default:
 		err = errors.Errorf("Cloud '%s' not supported", cloud)
 	}
