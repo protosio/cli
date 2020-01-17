@@ -38,7 +38,7 @@ func newScalewayClient() (*scaleway, error) {
 
 }
 
-// NewInstance created a new Protos instance on Scaleway
+// NewInstance creates a new Protos instance on Scaleway
 func (sw *scaleway) NewInstance(name string, imageID string, pubKey string) (string, error) {
 
 	//
@@ -97,107 +97,53 @@ func (sw *scaleway) NewInstance(name string, imageID string, pubKey string) (str
 	}
 	log.Infof("Created server '%s' (%s)", srvResp.Server.Name, srvResp.Server.ID)
 
-	//
-	// start server
-	//
-
-	// default timeout is 5 minutes
-	log.Infof("Starting and waiting for server '%s' (%s)", srvResp.Server.Name, srvResp.Server.ID)
-	startReq := &instance.ServerActionAndWaitRequest{
-		ServerID: srvResp.Server.ID,
-		Zone:     scw.ZoneNlAms1,
-		Action:   instance.ServerActionPoweron,
-	}
-	err = sw.instanceAPI.ServerActionAndWait(startReq)
-	if err != nil {
-		return "", errors.Wrap(err, "Failed to start upload server")
-	}
-	log.Infof("Instance '%s' (%s) started successfully", srvResp.Server.Name, srvResp.Server.ID)
-
-	//
-	// refresh IP info
-	//
-
-	srvStatusResp, err := sw.instanceAPI.GetServer(&instance.GetServerRequest{ServerID: srvResp.Server.ID, Zone: scw.ZoneNlAms1})
-	if err != nil {
-		return "", errors.Wrap(err, "Failed to retrieve upload VM details")
-	}
-
-	return srvStatusResp.Server.PublicIP.Address.String(), nil
+	return srvResp.Server.ID, nil
 }
 
 func (sw *scaleway) DeleteInstance(id string) error {
+	err := sw.instanceAPI.DeleteServer(&instance.DeleteServerRequest{Zone: scw.ZoneNlAms1, ServerID: id})
+	if err != nil {
+		return errors.Wrapf(err, "Failed to delete instance '%s'", id)
+	}
 	return nil
 }
 
 func (sw *scaleway) StartInstance(id string) error {
+	startReq := &instance.ServerActionAndWaitRequest{
+		ServerID: id,
+		Zone:     scw.ZoneNlAms1,
+		Action:   instance.ServerActionPoweron,
+	}
+	err := sw.instanceAPI.ServerActionAndWait(startReq)
+	if err != nil {
+		return errors.Wrap(err, "Failed to start Scaleway instance")
+	}
 	return nil
 }
 
 func (sw *scaleway) StopInstance(id string) error {
-	return nil
-}
-
-func (sw *scaleway) AuthFields() []string {
-	return []string{"ORGANISATION_ID", "ACCESS_KEY", "SECRET_KEY"}
-}
-
-func (sw *scaleway) Init(auth map[string]string) error {
-	var err error
-
-	scwCredentials := &scalewayCredentials{}
-	for k, v := range auth {
-		switch k {
-		case "ORGANISATION_ID":
-			scwCredentials.organisationID = v
-		case "ACCESS_KEY":
-			scwCredentials.accessKey = v
-		case "SECRET_KEY":
-			scwCredentials.secretKey = v
-		default:
-			return errors.Errorf("Credentials field '%s' not supported for Scaleway cloud provider", k)
-		}
-		if v == "" {
-			return errors.Errorf("Credentials field '%s' is empty", k)
-		}
+	stopReq := &instance.ServerActionAndWaitRequest{
+		ServerID: id,
+		Zone:     scw.ZoneNlAms1,
+		Action:   instance.ServerActionPoweroff,
 	}
-
-	sw.credentials = scwCredentials
-	sw.client, err = scw.NewClient(
-		scw.WithDefaultOrganizationID(scwCredentials.organisationID),
-		scw.WithAuth(scwCredentials.accessKey, scwCredentials.secretKey),
-	)
+	err := sw.instanceAPI.ServerActionAndWait(stopReq)
 	if err != nil {
-		return errors.Wrap(err, "Failed to init Scaleway client")
-	}
-
-	sw.instanceAPI = instance.NewAPI(sw.client)
-	sw.accountAPI = account.NewAPI(sw.client)
-	sw.marketplaceAPI = marketplace.NewAPI(sw.client)
-	_, err = sw.accountAPI.ListSSHKeys(&account.ListSSHKeysRequest{})
-	if err != nil {
-		return errors.Wrap(err, "Failed to init Scaleway client")
+		return errors.Wrap(err, "Failed to stop Scaleway instance")
 	}
 	return nil
 }
 
-func (sw *scaleway) getUploadImageID(zone scw.Zone) (string, error) {
-	resp, err := sw.marketplaceAPI.ListImages(&marketplace.ListImagesRequest{})
+func (sw *scaleway) GetInstanceInfo(id string) (InstanceInfo, error) {
+	resp, err := sw.instanceAPI.GetServer(&instance.GetServerRequest{ServerID: id, Zone: scw.ZoneNlAms1})
 	if err != nil {
-		return "", errors.Wrap(err, "Failed to retrieve marketplace images from Scaleway")
+		return InstanceInfo{}, errors.Wrapf(err, "Failed to retrieve Scaleway instance (%s) information", id)
 	}
-	for _, img := range resp.Images {
-		if img.Name == "Ubuntu Bionic" {
-			for _, ver := range img.Versions {
-				for _, li := range ver.LocalImages {
-					if li.Arch == scalewayArch && li.Zone == zone {
-						return li.ID, nil
-					}
-				}
-			}
-		}
+	info := InstanceInfo{ID: id, Name: resp.Server.Name, Location: string(scw.ZoneNlAms1)}
+	if resp.Server.PublicIP != nil {
+		info.PublicIP = resp.Server.PublicIP.Address.String()
 	}
-	return "", errors.Errorf("Ubuntu Bionic image in zone '%s' not found", scw.ZoneFrPar1)
+	return info, nil
 }
 
 func (sw *scaleway) GetImages() (map[string]string, error) {
@@ -352,6 +298,80 @@ func (sw *scaleway) NewVolume() (string, error) {
 
 func (sw *scaleway) DeleteVolume(id string) error {
 	return nil
+}
+
+func (sw *scaleway) AttachVolume(volumeID string, instanceID string) error {
+	return nil
+}
+
+func (sw *scaleway) DettachVolume(volumeID string, instanceID string) error {
+	return nil
+}
+
+func (sw *scaleway) AuthFields() []string {
+	return []string{"ORGANISATION_ID", "ACCESS_KEY", "SECRET_KEY"}
+}
+
+func (sw *scaleway) Init(auth map[string]string) error {
+	var err error
+
+	scwCredentials := &scalewayCredentials{}
+	for k, v := range auth {
+		switch k {
+		case "ORGANISATION_ID":
+			scwCredentials.organisationID = v
+		case "ACCESS_KEY":
+			scwCredentials.accessKey = v
+		case "SECRET_KEY":
+			scwCredentials.secretKey = v
+		default:
+			return errors.Errorf("Credentials field '%s' not supported for Scaleway cloud provider", k)
+		}
+		if v == "" {
+			return errors.Errorf("Credentials field '%s' is empty", k)
+		}
+	}
+
+	sw.credentials = scwCredentials
+	sw.client, err = scw.NewClient(
+		scw.WithDefaultOrganizationID(scwCredentials.organisationID),
+		scw.WithAuth(scwCredentials.accessKey, scwCredentials.secretKey),
+	)
+	if err != nil {
+		return errors.Wrap(err, "Failed to init Scaleway client")
+	}
+
+	sw.instanceAPI = instance.NewAPI(sw.client)
+	sw.accountAPI = account.NewAPI(sw.client)
+	sw.marketplaceAPI = marketplace.NewAPI(sw.client)
+	_, err = sw.accountAPI.ListSSHKeys(&account.ListSSHKeysRequest{})
+	if err != nil {
+		return errors.Wrap(err, "Failed to init Scaleway client")
+	}
+	return nil
+}
+
+//
+// helper methods
+//
+
+func (sw *scaleway) getUploadImageID(zone scw.Zone) (string, error) {
+	resp, err := sw.marketplaceAPI.ListImages(&marketplace.ListImagesRequest{})
+	if err != nil {
+		return "", errors.Wrap(err, "Failed to retrieve marketplace images from Scaleway")
+	}
+	for _, img := range resp.Images {
+		if img.Name == "Ubuntu Bionic" {
+			for _, ver := range img.Versions {
+				for _, li := range ver.LocalImages {
+					if li.Arch == scalewayArch && li.Zone == zone {
+						return li.ID, nil
+					}
+				}
+			}
+		}
+	}
+	return "", errors.Errorf("Ubuntu Bionic image in zone '%s' not found", scw.ZoneFrPar1)
 }
 
 func (sw *scaleway) cleanImageSSHkeys(keyID string) {

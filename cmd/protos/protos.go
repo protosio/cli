@@ -198,21 +198,34 @@ func protosInit(log *logrus.Logger) error {
 	// deploy a protos instance
 	vmName := "protos1"
 	log.Infof("Deploying Protos instance '%s' using image '%s'", vmName, imageID)
-	vmIP, err := client.NewInstance(vmName, imageID, key.Public())
+	vmID, err := client.NewInstance(vmName, imageID, key.Public())
 	if err != nil {
 		return errors.Wrap(err, "Failed to deploy Protos instance")
 	}
+	log.Infof("Instance with ID '%s' deployed", vmID)
+
+	// start protos instance
+	err = client.StartInstance(vmID)
+	if err != nil {
+		return errors.Wrap(err, "Failed to start Protos instance")
+	}
+
+	// get info about the instance
+	instanceInfo, err := client.GetInstanceInfo(vmID)
+	if err != nil {
+		return errors.Wrap(err, "Failed to get Protos instance info")
+	}
 
 	// test SSH and create SSH tunnel used for initialisation
-	tempClient, err := ssh.NewConnection(vmIP, "root", key.SSHAuth(), 10)
+	tempClient, err := ssh.NewConnection(instanceInfo.PublicIP, "root", key.SSHAuth(), 10)
 	if err != nil {
-		return errors.Wrap(err, "Failed to initialize Protos")
+		return errors.Wrap(err, "Failed to connect to Protos instance via SSH")
 	}
 	tempClient.Close()
 	log.Info("Instance is ready and accepting SSH connections")
 
-	log.Infof("Creating SSH tunnel to the new VM, using ip '%s'", vmIP)
-	tunnel := ssh.NewTunnel(vmIP+":22", "root", key.SSHAuth(), "localhost:8080", log)
+	log.Infof("Creating SSH tunnel to the new VM, using ip '%s'", instanceInfo.PublicIP)
+	tunnel := ssh.NewTunnel(instanceInfo.PublicIP+":22", "root", key.SSHAuth(), "localhost:8080", log)
 	localPort, err := tunnel.Start()
 	if err != nil {
 		return errors.Wrap(err, "Error while creating the SSH tunnel")
@@ -234,7 +247,7 @@ func protosInit(log *logrus.Logger) error {
 		return errors.Wrap(err, "Error while terminating the SSH tunnel")
 	}
 	log.Info("SSH tunnel terminated successfully")
-	log.Infof("Protos instance '%s' - '%s' deployed successfully", vmName, vmIP)
+	log.Infof("Protos instance '%s' - '%s' deployed successfully", vmName, instanceInfo.PublicIP)
 
 	// // get user details
 	// userDetails := userDetails{}
