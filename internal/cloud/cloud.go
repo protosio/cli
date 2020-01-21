@@ -4,16 +4,38 @@ import (
 	"github.com/pkg/errors"
 )
 
+type Type string
+
+func (ct Type) String() string {
+	return string(ct)
+}
+
 const (
 	// DigitalOcean represents the DigitalOcean cloud provider
-	DigitalOcean = "digitalocean"
+	DigitalOcean = Type("digitalocean")
 	// Scaleway represents the Scaleway cloud provider
-	Scaleway = "scaleway"
+	Scaleway = Type("scaleway")
 )
 
 // SupportedProviders returns a list of supported cloud providers
 func SupportedProviders() []string {
-	return []string{Scaleway}
+	return []string{Scaleway.String()}
+}
+
+// ProviderInfo stores information about a cloud provider
+type ProviderInfo struct {
+	Name string `storm:"id"`
+	Type Type
+	Auth map[string]string
+}
+
+// Client returns a cloud provider client that can be used to run all the operations exposed by the Provider interface
+func (pi ProviderInfo) Client() (Provider, error) {
+	client, err := NewProvider(pi.Name, pi.Type.String())
+	if err != nil {
+		return nil, err
+	}
+	return client, nil
 }
 
 // InstanceInfo holds information about a cloud instance
@@ -24,12 +46,14 @@ type InstanceInfo struct {
 	Location string
 }
 
-// Client allows interactions with cloud instances and images
-type Client interface {
+// Provider allows interactions with cloud instances and images
+type Provider interface {
 	// Config methods
 	AuthFields() (fields []string)                      // returns the fields that are required to authenticate for a specific cloud provider
 	SupportedLocations() (locations []string)           // returns the supported locations for a specific cloud provider
 	Init(auth map[string]string, location string) error // a cloud provider always needs to have Init called to configure it
+	GetInfo() ProviderInfo                              // returns information that can be stored in the database and allows for re-creation of the provider
+
 	// Instance methods
 	NewInstance(name string, image string, pubKey string) (id string, err error)
 	DeleteInstance(id string) error
@@ -48,15 +72,16 @@ type Client interface {
 	DettachVolume(volumeID string, instanceID string) error
 }
 
-// NewClient creates a new cloud provider client
-func NewClient(cloud string) (Client, error) {
-	var client Client
+// NewProvider creates a new cloud provider client
+func NewProvider(cloudName string, cloud string) (Provider, error) {
+	var client Provider
 	var err error
-	switch cloud {
+	cloudType := Type(cloud)
+	switch cloudType {
 	// case DigitalOcean:
 	// 	client, err = newDigitalOceanClient()
 	case Scaleway:
-		client = newScalewayClient()
+		client = newScalewayClient(cloudName)
 	default:
 		err = errors.Errorf("Cloud '%s' not supported", cloud)
 	}

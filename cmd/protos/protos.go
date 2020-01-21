@@ -10,13 +10,17 @@ import (
 	survey "github.com/AlecAivazis/survey/v2"
 	"github.com/pkg/errors"
 	"github.com/protosio/cli/internal/cloud"
+	"github.com/protosio/cli/internal/db"
 	ssh "github.com/protosio/cli/internal/ssh"
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli/v2"
 )
 
+var log *logrus.Logger
+var dbp db.DB
+
 func main() {
-	log := logrus.New()
+	log = logrus.New()
 	var loglevel string
 	app := &cli.App{
 		Name:    "protos",
@@ -35,7 +39,56 @@ func main() {
 				Name:  "init",
 				Usage: "Initializes Protos locally and deploys an instance in one of the supported clouds",
 				Action: func(c *cli.Context) error {
-					return protosInit(log)
+					return protosInit()
+				},
+			},
+			{
+				Name:  "cloud",
+				Usage: "Manage clouds",
+				Subcommands: []*cli.Command{
+					{
+						Name:  "ls",
+						Usage: "List existing cloud provider accounts",
+						Action: func(c *cli.Context) error {
+							usr, _ := user.Current()
+							protosDB := usr.HomeDir + "/.protos/protos.db"
+							var err error
+							dbp, err = db.Open(protosDB)
+							if err != nil {
+								return err
+							}
+
+							clouds, err := dbp.GetAllClouds()
+							if err != nil {
+								return err
+							}
+							for _, cl := range clouds {
+								log.Info(cl.Name, " --- ", cl.Type)
+							}
+							return nil
+						},
+					},
+					{
+						Name:  "add",
+						Usage: "Add a new cloud provider account",
+						Action: func(c *cli.Context) error {
+							return nil
+						},
+					},
+					{
+						Name:  "delete",
+						Usage: "Delete an existing cloud provider account",
+						Action: func(c *cli.Context) error {
+							return nil
+						},
+					},
+					{
+						Name:  "check",
+						Usage: "Checks validity of an existing cloud provider account ",
+						Action: func(c *cli.Context) error {
+							return nil
+						},
+					},
 				},
 			},
 		},
@@ -101,17 +154,10 @@ func getUserDetailsQuestions(ud *userDetails) []*survey.Question {
 	}
 }
 
-func getCloudProviderSelect(cloudProviders []string) *survey.Select {
+func surveySelect(options []string, message string) *survey.Select {
 	return &survey.Select{
-		Message: "Choose one of the following supported cloud providers:",
-		Options: cloudProviders,
-	}
-}
-
-func getCloudProviderLocationSelect(providerName string, cloudProviderLocations []string) *survey.Select {
-	return &survey.Select{
-		Message: fmt.Sprintf("Choose one of the following supported locations supported for '%s':", providerName),
-		Options: cloudProviderLocations,
+		Message: message,
+		Options: options,
 	}
 }
 
@@ -139,57 +185,89 @@ func catchSignals(sigs chan os.Signal, quit chan interface{}) {
 	quit <- true
 }
 
-func protosInit(log *logrus.Logger) error {
-
-	// create config and state directory
-	usr, _ := user.Current()
-	protosDir := usr.HomeDir + "/.protos"
-	log.Infof("Creating Protos directory '%s'", protosDir)
-	err := os.MkdirAll(protosDir, os.FileMode(0600))
-	if err != nil {
-		return errors.Wrap(err, "Failed to initialize Protos")
-	}
-
+func addCloudProvider() (cloud.Provider, error) {
 	// select cloud provider
-	var cloudProvider string
-	cloudProviders := cloud.SupportedProviders()
-	cloudProviderSelect := getCloudProviderSelect(cloudProviders)
-
-	err = survey.AskOne(cloudProviderSelect, &cloudProvider)
+	var cloudType string
+	cloudProviderSelect := surveySelect(cloud.SupportedProviders(), "Choose one of the following supported cloud providers:")
+	err := survey.AskOne(cloudProviderSelect, &cloudType)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	client, err := cloud.NewClient(cloudProvider)
+	// get a name to use internally for this specific cloud provider + credentials. This allows for adding multiple accounts of the same cloud
+	cloudNameQuestion := []*survey.Question{{
+		Name:     "name",
+		Prompt:   &survey.Input{Message: "Write a name used to identify this cloud provider account internally:"},
+		Validate: survey.Required,
+	}}
+	var cloudName string
+	err = survey.Ask(cloudNameQuestion, &cloudName)
+
+	// create new cloud provider
+	client, err := cloud.NewProvider(cloudName, cloudType)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// get cloud provider credentials
 	cloudCredentials := map[string]interface{}{}
 	credFields := client.AuthFields()
-	credentialsQuestions := getCloudCredentialsQuestions(cloudProvider, credFields)
+	credentialsQuestions := getCloudCredentialsQuestions(cloudType, credFields)
 
 	err = survey.Ask(credentialsQuestions, &cloudCredentials)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// get cloud provider location
 	var cloudLocation string
 	supportedLocations := client.SupportedLocations()
-	cloudLocationQuestions := getCloudProviderLocationSelect(cloudProvider, supportedLocations)
-
+	cloudLocationQuestions := surveySelect(supportedLocations, fmt.Sprintf("Choose one of the following supported locations supported for '%s':", cloudType))
 	err = survey.AskOne(cloudLocationQuestions, &cloudLocation)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// init cloud client
 	err = client.Init(transformCredentials(cloudCredentials), cloudLocation)
 	if err != nil {
+		return nil, err
+	}
+
+	// save the cloud provider in the db
+	cloudProviderInfo := client.GetInfo()
+	err = dbp.SaveCloud(cloudProviderInfo)
+	if err != nil {
+		return nil, errors.Wrap(err, "Failed to save cloud provider info")
+	}
+
+	return client, nil
+}
+
+func protosInit() error {
+
+	// create Protos DB
+	dbPath, err := db.Init()
+	if err != nil {
+		return errors.Wrap(err, "Failed to initialize Protos")
+	}
+	dbp, err = db.Open(dbPath)
+	if err != nil {
 		return err
 	}
+
+	//
+	// add cloud provider
+	//
+
+	client, err := addCloudProvider()
+	if err != nil {
+		return err
+	}
+
+	//
+	// Protos instance creation steps
+	//
 
 	imageID := ""
 	images, err := client.GetImages()

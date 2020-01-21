@@ -24,16 +24,18 @@ type scalewayCredentials struct {
 }
 
 type scaleway struct {
+	name           string
 	credentials    *scalewayCredentials
 	client         *scw.Client
 	instanceAPI    *instance.API
 	accountAPI     *account.API
 	marketplaceAPI *marketplace.API
+	auth           map[string]string
 	location       scw.Zone
 }
 
-func newScalewayClient() *scaleway {
-	return &scaleway{}
+func newScalewayClient(name string) *scaleway {
+	return &scaleway{name: name}
 }
 
 //
@@ -68,6 +70,8 @@ func (sw *scaleway) Init(auth map[string]string, location string) error {
 		}
 	}
 
+	sw.auth = auth
+
 	if i, found := findInSlice(sw.SupportedLocations(), location); found {
 		sw.location = scw.Zone(sw.SupportedLocations()[i])
 	} else {
@@ -91,6 +95,10 @@ func (sw *scaleway) Init(auth map[string]string, location string) error {
 		return errors.Wrap(err, "Failed to init Scaleway client")
 	}
 	return nil
+}
+
+func (sw *scaleway) GetInfo() ProviderInfo {
+	return ProviderInfo{Name: sw.name, Type: Scaleway, Auth: sw.auth}
 }
 
 //
