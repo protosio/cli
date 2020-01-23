@@ -78,16 +78,16 @@ func main() {
 						},
 					},
 					{
-						Name:      "check",
+						Name:      "info",
 						ArgsUsage: "<name>",
-						Usage:     "Checks validity of an existing cloud provider account",
+						Usage:     "Prints info about cloud provider account and checks if the API is reachable",
 						Action: func(c *cli.Context) error {
 							name := c.Args().Get(0)
 							if name == "" {
 								cli.ShowSubcommandHelp(c)
 								os.Exit(1)
 							}
-							return checkCloudProvider(name)
+							return infoCloudProvider(name)
 						},
 					},
 				},
@@ -216,7 +216,7 @@ func deleteCloudProvider(name string) error {
 	return dbp.DeleteCloud(name)
 }
 
-func checkCloudProvider(name string) error {
+func infoCloudProvider(name string) error {
 	cloud, err := dbp.GetCloud(name)
 	if err != nil {
 		return errors.Wrapf(err, "Could not retrieve cloud '%s'", name)
@@ -232,7 +232,7 @@ func checkCloudProvider(name string) error {
 	if err != nil {
 		fmt.Printf("Status: NOT OK (%s)\n", err.Error())
 	} else {
-		fmt.Printf("Status: OK\n")
+		fmt.Printf("Status: OK - API reachable\n")
 	}
 	return nil
 }
