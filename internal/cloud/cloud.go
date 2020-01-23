@@ -1,6 +1,8 @@
 package cloud
 
 import (
+	"log"
+
 	"github.com/pkg/errors"
 )
 
@@ -30,12 +32,12 @@ type ProviderInfo struct {
 }
 
 // Client returns a cloud provider client that can be used to run all the operations exposed by the Provider interface
-func (pi ProviderInfo) Client() (Provider, error) {
+func (pi ProviderInfo) Client() Provider {
 	client, err := NewProvider(pi.Name, pi.Type.String())
 	if err != nil {
-		return nil, err
+		log.Fatal(err)
 	}
-	return client, nil
+	return client
 }
 
 // InstanceInfo holds information about a cloud instance

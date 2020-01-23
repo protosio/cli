@@ -3,15 +3,12 @@ package main
 import (
 	"fmt"
 	"os"
-	"os/signal"
-	"os/user"
-	"syscall"
+	"text/tabwriter"
 
 	survey "github.com/AlecAivazis/survey/v2"
 	"github.com/pkg/errors"
 	"github.com/protosio/cli/internal/cloud"
 	"github.com/protosio/cli/internal/db"
-	ssh "github.com/protosio/cli/internal/ssh"
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli/v2"
 )
@@ -50,43 +47,47 @@ func main() {
 						Name:  "ls",
 						Usage: "List existing cloud provider accounts",
 						Action: func(c *cli.Context) error {
-							usr, _ := user.Current()
-							protosDB := usr.HomeDir + "/.protos/protos.db"
-							var err error
-							dbp, err = db.Open(protosDB)
-							if err != nil {
-								return err
-							}
-
-							clouds, err := dbp.GetAllClouds()
-							if err != nil {
-								return err
-							}
-							for _, cl := range clouds {
-								log.Info(cl.Name, " --- ", cl.Type)
-							}
-							return nil
+							return listCloudProviders()
 						},
 					},
 					{
-						Name:  "add",
-						Usage: "Add a new cloud provider account",
+						Name:      "add",
+						ArgsUsage: "<name>",
+						Usage:     "Add a new cloud provider account",
 						Action: func(c *cli.Context) error {
-							return nil
+							name := c.Args().Get(0)
+							if name == "" {
+								cli.ShowSubcommandHelp(c)
+								os.Exit(1)
+							}
+							_, err := addCloudProvider(name)
+							return err
 						},
 					},
 					{
-						Name:  "delete",
-						Usage: "Delete an existing cloud provider account",
+						Name:      "delete",
+						ArgsUsage: "<name>",
+						Usage:     "Delete an existing cloud provider account",
 						Action: func(c *cli.Context) error {
-							return nil
+							name := c.Args().Get(0)
+							if name == "" {
+								cli.ShowSubcommandHelp(c)
+								os.Exit(1)
+							}
+							return deleteCloudProvider(name)
 						},
 					},
 					{
-						Name:  "check",
-						Usage: "Checks validity of an existing cloud provider account ",
+						Name:      "check",
+						ArgsUsage: "<name>",
+						Usage:     "Checks validity of an existing cloud provider account",
 						Action: func(c *cli.Context) error {
-							return nil
+							name := c.Args().Get(0)
+							if name == "" {
+								cli.ShowSubcommandHelp(c)
+								os.Exit(1)
+							}
+							return checkCloudProvider(name)
 						},
 					},
 				},
@@ -100,6 +101,7 @@ func main() {
 			return err
 		}
 		log.SetLevel(level)
+		config(c.Args().First())
 		return nil
 	}
 
@@ -117,61 +119,6 @@ type userDetails struct {
 	Domain          string
 }
 
-func getUserDetailsQuestions(ud *userDetails) []*survey.Question {
-	return []*survey.Question{
-		{
-			Name:      "username",
-			Prompt:    &survey.Input{Message: "Username:"},
-			Validate:  survey.Required,
-			Transform: survey.ToLower,
-		},
-		{
-			Name:      "name",
-			Prompt:    &survey.Input{Message: "Name:"},
-			Validate:  survey.Required,
-			Transform: survey.Title,
-		},
-		{
-			Name:     "password",
-			Prompt:   &survey.Password{Message: "Password:"},
-			Validate: survey.Required,
-		},
-		{
-			Name:   "passwordconfirm",
-			Prompt: &survey.Password{Message: "Confirm password:"},
-			Validate: func(val interface{}) error {
-				if str, ok := val.(string); ok && str != ud.Password {
-					return fmt.Errorf("passwords don't match")
-				}
-				return nil
-			},
-		},
-		{
-			Name:     "domain",
-			Prompt:   &survey.Input{Message: "Domain name (registered with one of the supported domain providers)"},
-			Validate: survey.Required,
-		},
-	}
-}
-
-func surveySelect(options []string, message string) *survey.Select {
-	return &survey.Select{
-		Message: message,
-		Options: options,
-	}
-}
-
-func getCloudCredentialsQuestions(providerName string, fields []string) []*survey.Question {
-	qs := []*survey.Question{}
-	for _, field := range fields {
-		qs = append(qs, &survey.Question{
-			Name:     field,
-			Prompt:   &survey.Input{Message: providerName + " " + field + ":"},
-			Validate: survey.Required})
-	}
-	return qs
-}
-
 func transformCredentials(creds map[string]interface{}) map[string]string {
 	transformed := map[string]string{}
 	for name, val := range creds {
@@ -185,7 +132,37 @@ func catchSignals(sigs chan os.Signal, quit chan interface{}) {
 	quit <- true
 }
 
-func addCloudProvider() (cloud.Provider, error) {
+func config(currentCmd string) {
+	var err error
+	if currentCmd != "init" {
+		dbp, err = db.Open("")
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+}
+
+func listCloudProviders() error {
+	clouds, err := dbp.GetAllClouds()
+	if err != nil {
+		return err
+	}
+
+	w := new(tabwriter.Writer)
+	w.Init(os.Stdout, 16, 16, 0, '\t', 0)
+
+	defer w.Flush()
+
+	fmt.Fprintf(w, " %s\t%s\t", "Name", "Type")
+	fmt.Fprintf(w, "\n %s\t%s\t", "----", "----")
+	for _, cl := range clouds {
+		fmt.Fprintf(w, "\n %s\t%s\t", cl.Name, cl.Type)
+	}
+	fmt.Fprint(w, "\n")
+	return nil
+}
+
+func addCloudProvider(cloudName string) (cloud.Provider, error) {
 	// select cloud provider
 	var cloudType string
 	cloudProviderSelect := surveySelect(cloud.SupportedProviders(), "Choose one of the following supported cloud providers:")
@@ -193,15 +170,6 @@ func addCloudProvider() (cloud.Provider, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	// get a name to use internally for this specific cloud provider + credentials. This allows for adding multiple accounts of the same cloud
-	cloudNameQuestion := []*survey.Question{{
-		Name:     "name",
-		Prompt:   &survey.Input{Message: "Write a name used to identify this cloud provider account internally:"},
-		Validate: survey.Required,
-	}}
-	var cloudName string
-	err = survey.Ask(cloudNameQuestion, &cloudName)
 
 	// create new cloud provider
 	client, err := cloud.NewProvider(cloudName, cloudType)
@@ -244,130 +212,27 @@ func addCloudProvider() (cloud.Provider, error) {
 	return client, nil
 }
 
-func protosInit() error {
+func deleteCloudProvider(name string) error {
+	return dbp.DeleteCloud(name)
+}
 
-	// create Protos DB
-	dbPath, err := db.Init()
+func checkCloudProvider(name string) error {
+	cloud, err := dbp.GetCloud(name)
 	if err != nil {
-		return errors.Wrap(err, "Failed to initialize Protos")
+		return errors.Wrapf(err, "Could not retrieve cloud '%s'", name)
 	}
-	dbp, err = db.Open(dbPath)
+	client := cloud.Client()
+	locations := client.SupportedLocations()
+	err = client.Init(cloud.Auth, locations[0])
 	if err != nil {
-		return err
+		return errors.Wrapf(err, "Failed to connect to cloud provider '%s'(%s) API", name, cloud.Type.String())
 	}
-
-	//
-	// add cloud provider
-	//
-
-	client, err := addCloudProvider()
+	fmt.Printf("Name: %s\n", cloud.Name)
+	fmt.Printf("Type: %s\n", cloud.Type.String())
 	if err != nil {
-		return err
-	}
-
-	//
-	// Protos instance creation steps
-	//
-
-	imageID := ""
-	images, err := client.GetImages()
-	if err != nil {
-		return errors.Wrap(err, "Failed to initialize Protos")
-	}
-	if id, found := images["protos-image"]; found == true {
-		log.Infof("Found latest Protos image (%s) in your infra cloud account", id)
-		imageID = id
+		fmt.Printf("Status: NOT OK (%s)\n", err.Error())
 	} else {
-		// upload protos image
-		log.Info("Latest Protos image not in your infra cloud account. Adding it.")
-		imageID, err = client.AddImage("https://releases.protos.io/test/scaleway-efi.iso", "4b49901e65420b55170d95768f431595")
-		if err != nil {
-			return errors.Wrap(err, "Failed to initialize Protos")
-		}
+		fmt.Printf("Status: OK\n")
 	}
-
-	// create SSH key used for instance
-	log.Info("Generating SSH key for the new VM instance")
-	key, err := ssh.GenerateKey()
-	if err != nil {
-		return errors.Wrap(err, "Failed to initialize Protos")
-	}
-
-	// deploy a protos instance
-	vmName := "protos1"
-	log.Infof("Deploying Protos instance '%s' using image '%s'", vmName, imageID)
-	vmID, err := client.NewInstance(vmName, imageID, key.Public())
-	if err != nil {
-		return errors.Wrap(err, "Failed to deploy Protos instance")
-	}
-	log.Infof("Instance with ID '%s' deployed", vmID)
-
-	// create protos data volume
-	log.Infof("Creating data volume for Protos instance '%s'", vmName)
-	volumeID, err := client.NewVolume(vmName, 30000)
-	if err != nil {
-		return errors.Wrap(err, "Failed to create data volume")
-	}
-
-	// attach volume to instance
-	err = client.AttachVolume(volumeID, vmID)
-	if err != nil {
-		return errors.Wrapf(err, "Failed to attach volume to instance '%s'", vmName)
-	}
-
-	// start protos instance
-	log.Infof("Starting Protos instance '%s'", vmName)
-	err = client.StartInstance(vmID)
-	if err != nil {
-		return errors.Wrap(err, "Failed to start Protos instance")
-	}
-
-	// get info about the instance
-	instanceInfo, err := client.GetInstanceInfo(vmID)
-	if err != nil {
-		return errors.Wrap(err, "Failed to get Protos instance info")
-	}
-
-	// test SSH and create SSH tunnel used for initialisation
-	tempClient, err := ssh.NewConnection(instanceInfo.PublicIP, "root", key.SSHAuth(), 10)
-	if err != nil {
-		return errors.Wrap(err, "Failed to connect to Protos instance via SSH")
-	}
-	tempClient.Close()
-	log.Info("Instance is ready and accepting SSH connections")
-
-	log.Infof("Creating SSH tunnel to the new VM, using ip '%s'", instanceInfo.PublicIP)
-	tunnel := ssh.NewTunnel(instanceInfo.PublicIP+":22", "root", key.SSHAuth(), "localhost:8080", log)
-	localPort, err := tunnel.Start()
-	if err != nil {
-		return errors.Wrap(err, "Error while creating the SSH tunnel")
-	}
-
-	quit := make(chan interface{}, 1)
-	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
-	go catchSignals(sigs, quit)
-
-	log.Infof("SSH tunnel ready. Please do the setup using a browser at 'http://localhost:%d/'. Once finished, press CTRL+C to continue", localPort)
-
-	// waiting for a SIGTERM or SIGINT
-	<-quit
-
-	log.Info("CTRL+C received. Shutting down the SSH tunnel")
-	err = tunnel.Close()
-	if err != nil {
-		return errors.Wrap(err, "Error while terminating the SSH tunnel")
-	}
-	log.Info("SSH tunnel terminated successfully")
-	log.Infof("Protos instance '%s' - '%s' deployed successfully", vmName, instanceInfo.PublicIP)
-
-	// // get user details
-	// userDetails := userDetails{}
-	// userDetailsQuestions := getUserDetailsQuestions(&userDetails)
-	// err = survey.Ask(userDetailsQuestions, &userDetails)
-	// if err != nil {
-	// 	return err
-	// }
-
 	return nil
 }

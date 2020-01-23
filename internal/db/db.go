@@ -9,6 +9,11 @@ import (
 	"github.com/protosio/cli/internal/cloud"
 )
 
+const (
+	// DefaultPath indicates the default path where the DB file is saved
+	DefaultPath = "/.protos/protos.db"
+)
+
 type dbstorm struct {
 	s *storm.DB
 }
@@ -67,6 +72,10 @@ func New(path string) error {
 
 // Open tries to open a client for the db on the provided path
 func Open(path string) (DB, error) {
+	if path == "" {
+		usr, _ := user.Current()
+		path = usr.HomeDir + DefaultPath
+	}
 	_, err := os.Stat(path)
 	if err != nil {
 		return nil, errors.Wrap(err, "Can't find database file. Please run init")
@@ -89,6 +98,16 @@ func (db *dbstorm) SaveCloud(cloud cloud.ProviderInfo) error {
 }
 
 func (db *dbstorm) DeleteCloud(name string) error {
+	cp := cloud.ProviderInfo{}
+	err := db.s.One("Name", name, &cp)
+	if err != nil {
+		return err
+	}
+
+	err = db.s.Delete("ProviderInfo", name)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
