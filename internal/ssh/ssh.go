@@ -18,17 +18,19 @@ func GenerateKey() (Key, error) {
 	if err != nil {
 		return key, errors.Wrap(err, "Failed to generate SSH key")
 	}
-	// publicKey, err := ssh.NewPublicKey(key.public)
-	// if err != nil {
-	// 	return key, errors.Wrap(err, "Failed to generate SSH key")
-	// }
+	return key, nil
+}
 
-	// pemKey := &pem.Block{
-	// 	Type:  "OPENSSH PRIVATE KEY",
-	// 	Bytes: edkey.MarshalED25519PrivateKey(privKey),
-	// }
-	// privateKey := pem.EncodeToMemory(pemKey)
-	// authorizedKey := ssh.MarshalAuthorizedKey(publicKey)
+// NewFromSeed takes an ed25519 key seed and return a Key
+func NewFromSeed(seed []byte) (Key, error) {
+	key := Key{}
+	if len(seed) != 32 {
+		return key, errors.Errorf("Can't create key from seed. Seed has incorrect length: %d bytes", len(seed))
+	}
+	key.private = ed25519.NewKeyFromSeed(seed)
+	publicKey := make([]byte, ed25519.PublicKeySize)
+	copy(publicKey, key.private[32:])
+	key.public = publicKey
 	return key, nil
 }
 

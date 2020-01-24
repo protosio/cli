@@ -3,12 +3,15 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 	"text/tabwriter"
 
 	survey "github.com/AlecAivazis/survey/v2"
 	"github.com/pkg/errors"
 	"github.com/protosio/cli/internal/cloud"
 	"github.com/protosio/cli/internal/db"
+	ssh "github.com/protosio/cli/internal/ssh"
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli/v2"
 )
@@ -19,6 +22,7 @@ var dbp db.DB
 func main() {
 	log = logrus.New()
 	var loglevel string
+	var cloudName string
 	app := &cli.App{
 		Name:    "protos",
 		Usage:   "Command-line client for Protos",
@@ -92,6 +96,66 @@ func main() {
 					},
 				},
 			},
+			{
+				Name:  "instance",
+				Usage: "Manage Protos instances",
+				Subcommands: []*cli.Command{
+					{
+						Name:  "ls",
+						Usage: "List instances",
+						Action: func(c *cli.Context) error {
+							return listInstances()
+						},
+					},
+					{
+						Name:      "deploy",
+						ArgsUsage: "<name>",
+						Usage:     "Deploy a new Protos instance",
+						Flags: []cli.Flag{
+							&cli.StringFlag{
+								Name:        "cloud",
+								Usage:       "Specify which `CLOUD` to deploy the instance on",
+								Required:    true,
+								Destination: &cloudName,
+							},
+						},
+						Action: func(c *cli.Context) error {
+							name := c.Args().Get(0)
+							if name == "" {
+								cli.ShowSubcommandHelp(c)
+								os.Exit(1)
+							}
+							return addInstance(name, cloudName)
+						},
+					},
+					{
+						Name:      "delete",
+						ArgsUsage: "<name>",
+						Usage:     "Delete instance",
+						Action: func(c *cli.Context) error {
+							name := c.Args().Get(0)
+							if name == "" {
+								cli.ShowSubcommandHelp(c)
+								os.Exit(1)
+							}
+							return deleteInstance(name)
+						},
+					},
+					{
+						Name:      "tunnel",
+						ArgsUsage: "<name>",
+						Usage:     "Creates SSH encrypted tunnel to instance dashboard",
+						Action: func(c *cli.Context) error {
+							name := c.Args().Get(0)
+							if name == "" {
+								cli.ShowSubcommandHelp(c)
+								os.Exit(1)
+							}
+							return tunnelInstance(name)
+						},
+					},
+				},
+			},
 		},
 	}
 
@@ -141,6 +205,10 @@ func config(currentCmd string) {
 		}
 	}
 }
+
+//
+//  Cloud provider methods
+//
 
 func listCloudProviders() error {
 	clouds, err := dbp.GetAllClouds()
@@ -234,5 +302,178 @@ func infoCloudProvider(name string) error {
 	} else {
 		fmt.Printf("Status: OK - API reachable\n")
 	}
+	return nil
+}
+
+//
+// Instance methods
+//
+
+func listInstances() error {
+	instances, err := dbp.GetAllInstances()
+	if err != nil {
+		return err
+	}
+
+	w := new(tabwriter.Writer)
+	w.Init(os.Stdout, 8, 8, 0, '\t', 0)
+
+	defer w.Flush()
+
+	fmt.Fprintf(w, " %s\t%s\t%s\t%s\t%s\t", "Name", "IP", "Cloud", "VM ID", "Status")
+	fmt.Fprintf(w, "\n %s\t%s\t%s\t%s\t%s\t", "----", "--", "-----", "-----", "------")
+	for _, instance := range instances {
+		fmt.Fprintf(w, "\n %s\t%s\t%s\t%s\t%s\t", instance.Name, instance.PublicIP, instance.CloudName, instance.VMID, "n/a")
+	}
+	fmt.Fprint(w, "\n")
+	return nil
+}
+
+func addInstance(instanceName string, cloudName string) error {
+
+	// init cloud
+	cloud, err := dbp.GetCloud(cloudName)
+	if err != nil {
+		return errors.Wrapf(err, "Could not retrieve cloud '%s'", cloudName)
+	}
+	client := cloud.Client()
+	locations := client.SupportedLocations()
+	err = client.Init(cloud.Auth, locations[0])
+	if err != nil {
+		return errors.Wrapf(err, "Failed to connect to cloud provider '%s'(%s) API", cloudName, cloud.Type.String())
+	}
+
+	// add image
+	imageID := ""
+	images, err := client.GetImages()
+	if err != nil {
+		return errors.Wrap(err, "Failed to initialize Protos")
+	}
+	if id, found := images["protos-image"]; found == true {
+		log.Infof("Found latest Protos image (%s) in your infra cloud account", id)
+		imageID = id
+	} else {
+		// upload protos image
+		log.Info("Latest Protos image not in your infra cloud account. Adding it.")
+		imageID, err = client.AddImage("https://releases.protos.io/test/scaleway-efi.iso", "4b49901e65420b55170d95768f431595")
+		if err != nil {
+			return errors.Wrap(err, "Failed to initialize Protos")
+		}
+	}
+
+	// create SSH key used for instance
+	log.Info("Generating SSH key for the new VM instance")
+	key, err := ssh.GenerateKey()
+	if err != nil {
+		return errors.Wrap(err, "Failed to initialize Protos")
+	}
+
+	// deploy a protos instance
+	log.Infof("Deploying Protos instance '%s' using image '%s'", instanceName, imageID)
+	vmID, err := client.NewInstance(instanceName, imageID, key.Public())
+	if err != nil {
+		return errors.Wrap(err, "Failed to deploy Protos instance")
+	}
+	log.Infof("Instance with ID '%s' deployed", vmID)
+
+	// create protos data volume
+	log.Infof("Creating data volume for Protos instance '%s'", instanceName)
+	volumeID, err := client.NewVolume(instanceName, 30000)
+	if err != nil {
+		return errors.Wrap(err, "Failed to create data volume")
+	}
+
+	// attach volume to instance
+	err = client.AttachVolume(volumeID, vmID)
+	if err != nil {
+		return errors.Wrapf(err, "Failed to attach volume to instance '%s'", instanceName)
+	}
+
+	// start protos instance
+	log.Infof("Starting Protos instance '%s'", instanceName)
+	err = client.StartInstance(vmID)
+	if err != nil {
+		return errors.Wrap(err, "Failed to start Protos instance")
+	}
+
+	// get info about the instance
+	instanceInfo, err := client.GetInstanceInfo(vmID)
+	if err != nil {
+		return errors.Wrap(err, "Failed to get Protos instance info")
+	}
+
+	instanceInfo.KeySeed = key.Seed()
+	err = dbp.SaveInstance(instanceInfo)
+	if err != nil {
+		return errors.Wrapf(err, "Failed to save instance '%s'", instanceName)
+	}
+
+	return nil
+}
+
+func deleteInstance(name string) error {
+	instance, err := dbp.GetInstance(name)
+	if err != nil {
+		return errors.Wrapf(err, "Could not retrieve instance '%s'", name)
+	}
+	cloudInfo, err := dbp.GetCloud(instance.CloudName)
+	if err != nil {
+		return errors.Wrapf(err, "Could not retrieve cloud '%s'", name)
+	}
+	client := cloudInfo.Client()
+	err = client.Init(cloudInfo.Auth, instance.Location)
+	if err != nil {
+		return errors.Wrapf(err, "Could not init cloud '%s'", name)
+	}
+
+	log.Infof("Stopping instance '%s' (%s)", instance.Name, instance.VMID)
+	err = client.StopInstance(instance.VMID)
+	if err != nil {
+		return errors.Wrapf(err, "Could not stop instance '%s'", name)
+	}
+	log.Infof("Deleting instance '%s' (%s)", instance.Name, instance.VMID)
+	err = client.DeleteInstance(instance.VMID)
+	if err != nil {
+		return errors.Wrapf(err, "Could not delete instance '%s'", name)
+	}
+	return dbp.DeleteInstance(name)
+}
+
+func tunnelInstance(name string) error {
+	instanceInfo, err := dbp.GetInstance(name)
+	if err != nil {
+		return errors.Wrapf(err, "Could not retrieve instance '%s'", name)
+	}
+	if len(instanceInfo.KeySeed) == 0 {
+		return errors.Errorf("Instance '%s' is missing its SSH key", name)
+	}
+	key, err := ssh.NewFromSeed(instanceInfo.KeySeed)
+	if err != nil {
+		return errors.Wrapf(err, "Instance '%s' has an invalid SSH key", name)
+	}
+
+	log.Infof("Creating SSH tunnel to instance '%s', using ip '%s'", instanceInfo.Name, instanceInfo.PublicIP)
+	tunnel := ssh.NewTunnel(instanceInfo.PublicIP+":22", "root", key.SSHAuth(), "localhost:8080", log)
+	localPort, err := tunnel.Start()
+	if err != nil {
+		return errors.Wrap(err, "Error while creating the SSH tunnel")
+	}
+
+	quit := make(chan interface{}, 1)
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	go catchSignals(sigs, quit)
+
+	log.Infof("SSH tunnel ready. Use 'http://localhost:%d/ to access the instance dashboard'. Once finished, press CTRL+C to terminate the SSH tunnel", localPort)
+
+	// waiting for a SIGTERM or SIGINT
+	<-quit
+
+	log.Info("CTRL+C received. Terminating the SSH tunnel")
+	err = tunnel.Close()
+	if err != nil {
+		return errors.Wrap(err, "Error while terminating the SSH tunnel")
+	}
+	log.Info("SSH tunnel terminated successfully")
 	return nil
 }

@@ -19,6 +19,10 @@ func (k Key) Public() string {
 	return string(ssh.MarshalAuthorizedKey(publicKey))
 }
 
+func (k Key) Seed() []byte {
+	return k.private
+}
+
 func (k Key) EncodePrivateKeytoPEM() string {
 	// Get ASN.1 DER format
 	privDER := edkey.MarshalED25519PrivateKey(k.private)

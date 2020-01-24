@@ -24,8 +24,10 @@ type DB interface {
 	DeleteCloud(name string) error
 	GetCloud(name string) (cloud.ProviderInfo, error)
 	GetAllClouds() ([]cloud.ProviderInfo, error)
-	SaveInstance(data interface{}) error
-	GetInstance(data interface{}) error
+	SaveInstance(instance cloud.InstanceInfo) error
+	DeleteInstance(name string) error
+	GetInstance(name string) (cloud.InstanceInfo, error)
+	GetAllInstances() ([]cloud.InstanceInfo, error)
 	Close() error
 }
 
@@ -129,12 +131,40 @@ func (db *dbstorm) GetAllClouds() ([]cloud.ProviderInfo, error) {
 	return cps, nil
 }
 
-func (db *dbstorm) SaveInstance(data interface{}) error {
+func (db *dbstorm) SaveInstance(instance cloud.InstanceInfo) error {
+	return db.s.Save(&instance)
+}
+
+func (db *dbstorm) DeleteInstance(name string) error {
+	instance := cloud.InstanceInfo{}
+	err := db.s.One("Name", name, &instance)
+	if err != nil {
+		return err
+	}
+
+	err = db.s.Delete("InstanceInfo", name)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
-func (db *dbstorm) GetInstance(data interface{}) error {
-	return nil
+func (db *dbstorm) GetInstance(name string) (cloud.InstanceInfo, error) {
+	instance := cloud.InstanceInfo{}
+	err := db.s.One("Name", name, &instance)
+	if err != nil {
+		return instance, err
+	}
+	return instance, nil
+}
+
+func (db *dbstorm) GetAllInstances() ([]cloud.InstanceInfo, error) {
+	instances := []cloud.InstanceInfo{}
+	err := db.s.All(&instances)
+	if err != nil {
+		return instances, err
+	}
+	return instances, nil
 }
 
 func (db *dbstorm) Close() error {

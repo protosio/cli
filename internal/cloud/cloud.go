@@ -42,10 +42,13 @@ func (pi ProviderInfo) Client() Provider {
 
 // InstanceInfo holds information about a cloud instance
 type InstanceInfo struct {
-	ID       string
-	Name     string
-	PublicIP string
-	Location string
+	VMID      string
+	Name      string `storm:"id"`
+	KeySeed   []byte
+	PublicIP  string
+	CloudType Type
+	CloudName string
+	Location  string
 }
 
 // Provider allows interactions with cloud instances and images

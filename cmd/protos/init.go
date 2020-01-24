@@ -130,7 +130,7 @@ func protosInit() error {
 	// waiting for a SIGTERM or SIGINT
 	<-quit
 
-	log.Info("CTRL+C received. Shutting down the SSH tunnel")
+	log.Info("CTRL+C received. Terminating the SSH tunnel")
 	err = tunnel.Close()
 	if err != nil {
 		return errors.Wrap(err, "Error while terminating the SSH tunnel")

@@ -206,7 +206,7 @@ func (sw *scaleway) GetInstanceInfo(id string) (InstanceInfo, error) {
 	if err != nil {
 		return InstanceInfo{}, errors.Wrapf(err, "Failed to retrieve Scaleway instance (%s) information", id)
 	}
-	info := InstanceInfo{ID: id, Name: resp.Server.Name, Location: string(sw.location)}
+	info := InstanceInfo{VMID: id, Name: resp.Server.Name, CloudName: sw.name, CloudType: Scaleway, Location: string(sw.location)}
 	if resp.Server.PublicIP != nil {
 		info.PublicIP = resp.Server.PublicIP.Address.String()
 	}
