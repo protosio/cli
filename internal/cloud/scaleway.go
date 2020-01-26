@@ -112,7 +112,7 @@ func (sw *scaleway) deleteSSHkey(name string) error {
 	}
 	for _, k := range keysResp.SSHKeys {
 		if k.Name == name {
-			log.Infof("Deleting SSH key '%s'", name)
+			log.Infof("Deleting SSH key '%s' (%s)", name, k.ID)
 			err = sw.accountAPI.DeleteSSHKey(&account.DeleteSSHKeyRequest{SSHKeyID: k.ID})
 			if err != nil {
 				return errors.Wrapf(err, "Failed to delete SSH key '%s'", name)
