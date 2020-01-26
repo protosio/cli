@@ -42,13 +42,13 @@ func protosFullInit() error {
 	// get a name to use internally for this specific cloud provider + credentials. This allows for adding multiple accounts of the same cloud
 	cloudNameQuestion := []*survey.Question{{
 		Name:     "name",
-		Prompt:   &survey.Input{Message: "Write a name used to identify this cloud provider account internally:"},
+		Prompt:   &survey.Input{Message: "In the following step you will add a cloud provider. Write a name used to identify this cloud provider account internally:"},
 		Validate: survey.Required,
 	}}
 	var cloudName string
 	err = survey.Ask(cloudNameQuestion, &cloudName)
 
-	client, err := addCloudProvider(cloudName)
+	_, err = addCloudProvider(cloudName)
 	if err != nil {
 		return err
 	}
@@ -57,63 +57,27 @@ func protosFullInit() error {
 	// Protos instance creation steps
 	//
 
-	imageID := ""
-	images, err := client.GetImages()
-	if err != nil {
-		return errors.Wrap(err, "Failed to initialize Protos")
-	}
-	if id, found := images["protos-image"]; found == true {
-		log.Infof("Found latest Protos image (%s) in your infra cloud account", id)
-		imageID = id
-	} else {
-		// upload protos image
-		log.Info("Latest Protos image not in your infra cloud account. Adding it.")
-		imageID, err = client.AddImage("https://releases.protos.io/test/scaleway-efi.iso", "4b49901e65420b55170d95768f431595")
-		if err != nil {
-			return errors.Wrap(err, "Failed to initialize Protos")
-		}
-	}
+	// get a name to use internally for this specific cloud provider + credentials. This allows for adding multiple accounts of the same cloud
+	vmNameQuestion := []*survey.Question{{
+		Name:     "name",
+		Prompt:   &survey.Input{Message: "Write a name used to identify Protos instance that will be deployed next:"},
+		Validate: survey.Required,
+	}}
+	var vmName string
+	err = survey.Ask(vmNameQuestion, &vmName)
 
-	// create SSH key used for instance
-	log.Info("Generating SSH key for the new VM instance")
-	key, err := ssh.GenerateKey()
+	instanceInfo, err := addInstance(vmName, cloudName)
 	if err != nil {
 		return errors.Wrap(err, "Failed to initialize Protos")
 	}
 
-	// deploy a protos instance
-	vmName := "protos1"
-	log.Infof("Deploying Protos instance '%s' using image '%s'", vmName, imageID)
-	vmID, err := client.NewInstance(vmName, imageID, key.Public())
-	if err != nil {
-		return errors.Wrap(err, "Failed to deploy Protos instance")
-	}
-	log.Infof("Instance with ID '%s' deployed", vmID)
+	//
+	// Perform setup via SSH tunnel
+	//
 
-	// create protos data volume
-	log.Infof("Creating data volume for Protos instance '%s'", vmName)
-	volumeID, err := client.NewVolume(vmName, 30000)
+	key, err := ssh.NewKeyFromSeed(instanceInfo.KeySeed)
 	if err != nil {
-		return errors.Wrap(err, "Failed to create data volume")
-	}
-
-	// attach volume to instance
-	err = client.AttachVolume(volumeID, vmID)
-	if err != nil {
-		return errors.Wrapf(err, "Failed to attach volume to instance '%s'", vmName)
-	}
-
-	// start protos instance
-	log.Infof("Starting Protos instance '%s'", vmName)
-	err = client.StartInstance(vmID)
-	if err != nil {
-		return errors.Wrap(err, "Failed to start Protos instance")
-	}
-
-	// get info about the instance
-	instanceInfo, err := client.GetInstanceInfo(vmID)
-	if err != nil {
-		return errors.Wrap(err, "Failed to get Protos instance info")
+		return errors.Wrap(err, "Failed to initialize Protos")
 	}
 
 	// test SSH and create SSH tunnel used for initialisation
@@ -122,40 +86,11 @@ func protosFullInit() error {
 		return errors.Wrap(err, "Failed to connect to Protos instance via SSH")
 	}
 	tempClient.Close()
-	log.Info("Instance is ready and accepting SSH connections")
+	log.Info("Instance is ready and accepting SSH connections. Perform instance setup using the web based dashboard")
 
-	log.Infof("Creating SSH tunnel to the new VM, using ip '%s'", instanceInfo.PublicIP)
-	tunnel := ssh.NewTunnel(instanceInfo.PublicIP+":22", "root", key.SSHAuth(), "localhost:8080", log)
-	localPort, err := tunnel.Start()
-	if err != nil {
-		return errors.Wrap(err, "Error while creating the SSH tunnel")
-	}
-
-	quit := make(chan interface{}, 1)
-	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
-	go catchSignals(sigs, quit)
-
-	log.Infof("SSH tunnel ready. Please do the setup using a browser at 'http://localhost:%d/'. Once finished, press CTRL+C to continue", localPort)
-
-	// waiting for a SIGTERM or SIGINT
-	<-quit
-
-	log.Info("CTRL+C received. Terminating the SSH tunnel")
-	err = tunnel.Close()
-	if err != nil {
-		return errors.Wrap(err, "Error while terminating the SSH tunnel")
-	}
-	log.Info("SSH tunnel terminated successfully")
+	// create tunnel to reach the instance dashboard
+	tunnelInstance(instanceInfo.Name)
 	log.Infof("Protos instance '%s' - '%s' deployed successfully", vmName, instanceInfo.PublicIP)
-
-	// // get user details
-	// userDetails := userDetails{}
-	// userDetailsQuestions := getUserDetailsQuestions(&userDetails)
-	// err = survey.Ask(userDetailsQuestions, &userDetails)
-	// if err != nil {
-	// 	return err
-	// }
 
 	return nil
 }

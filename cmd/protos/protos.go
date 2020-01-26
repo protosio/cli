@@ -138,7 +138,8 @@ func main() {
 								cli.ShowSubcommandHelp(c)
 								os.Exit(1)
 							}
-							return addInstance(name, cloudName)
+							_, err := addInstance(name, cloudName)
+							return err
 						},
 					},
 					{
@@ -305,7 +306,7 @@ func addCloudProvider(cloudName string) (cloud.Provider, error) {
 	// get cloud provider location
 	var cloudLocation string
 	supportedLocations := client.SupportedLocations()
-	cloudLocationQuestions := surveySelect(supportedLocations, fmt.Sprintf("Choose one of the following supported locations supported for '%s':", cloudType))
+	cloudLocationQuestions := surveySelect(supportedLocations, fmt.Sprintf("Choose one of the following supported locations for '%s':", cloudType))
 	err = survey.AskOne(cloudLocationQuestions, &cloudLocation)
 	if err != nil {
 		return nil, err
@@ -376,25 +377,25 @@ func listInstances() error {
 	return nil
 }
 
-func addInstance(instanceName string, cloudName string) error {
+func addInstance(instanceName string, cloudName string) (cloud.InstanceInfo, error) {
 
 	// init cloud
-	cloud, err := dbp.GetCloud(cloudName)
+	provider, err := dbp.GetCloud(cloudName)
 	if err != nil {
-		return errors.Wrapf(err, "Could not retrieve cloud '%s'", cloudName)
+		return cloud.InstanceInfo{}, errors.Wrapf(err, "Could not retrieve cloud '%s'", cloudName)
 	}
-	client := cloud.Client()
+	client := provider.Client()
 	locations := client.SupportedLocations()
-	err = client.Init(cloud.Auth, locations[0])
+	err = client.Init(provider.Auth, locations[0])
 	if err != nil {
-		return errors.Wrapf(err, "Failed to connect to cloud provider '%s'(%s) API", cloudName, cloud.Type.String())
+		return cloud.InstanceInfo{}, errors.Wrapf(err, "Failed to connect to cloud provider '%s'(%s) API", cloudName, provider.Type.String())
 	}
 
 	// add image
 	imageID := ""
 	images, err := client.GetImages()
 	if err != nil {
-		return errors.Wrap(err, "Failed to initialize Protos")
+		return cloud.InstanceInfo{}, errors.Wrap(err, "Failed to initialize Protos")
 	}
 	if id, found := images["protos-image"]; found == true {
 		log.Infof("Found latest Protos image (%s) in your infra cloud account", id)
@@ -404,7 +405,7 @@ func addInstance(instanceName string, cloudName string) error {
 		log.Info("Latest Protos image not in your infra cloud account. Adding it.")
 		imageID, err = client.AddImage("https://releases.protos.io/test/scaleway-efi.iso", "4b49901e65420b55170d95768f431595")
 		if err != nil {
-			return errors.Wrap(err, "Failed to initialize Protos")
+			return cloud.InstanceInfo{}, errors.Wrap(err, "Failed to initialize Protos")
 		}
 	}
 
@@ -412,14 +413,14 @@ func addInstance(instanceName string, cloudName string) error {
 	log.Info("Generating SSH key for the new VM instance")
 	key, err := ssh.GenerateKey()
 	if err != nil {
-		return errors.Wrap(err, "Failed to initialize Protos")
+		return cloud.InstanceInfo{}, errors.Wrap(err, "Failed to initialize Protos")
 	}
 
 	// deploy a protos instance
 	log.Infof("Deploying Protos instance '%s' using image '%s'", instanceName, imageID)
 	vmID, err := client.NewInstance(instanceName, imageID, key.Public())
 	if err != nil {
-		return errors.Wrap(err, "Failed to deploy Protos instance")
+		return cloud.InstanceInfo{}, errors.Wrap(err, "Failed to deploy Protos instance")
 	}
 	log.Infof("Instance with ID '%s' deployed", vmID)
 
@@ -427,35 +428,35 @@ func addInstance(instanceName string, cloudName string) error {
 	log.Infof("Creating data volume for Protos instance '%s'", instanceName)
 	volumeID, err := client.NewVolume(instanceName, 30000)
 	if err != nil {
-		return errors.Wrap(err, "Failed to create data volume")
+		return cloud.InstanceInfo{}, errors.Wrap(err, "Failed to create data volume")
 	}
 
 	// attach volume to instance
 	err = client.AttachVolume(volumeID, vmID)
 	if err != nil {
-		return errors.Wrapf(err, "Failed to attach volume to instance '%s'", instanceName)
+		return cloud.InstanceInfo{}, errors.Wrapf(err, "Failed to attach volume to instance '%s'", instanceName)
 	}
 
 	// start protos instance
 	log.Infof("Starting Protos instance '%s'", instanceName)
 	err = client.StartInstance(vmID)
 	if err != nil {
-		return errors.Wrap(err, "Failed to start Protos instance")
+		return cloud.InstanceInfo{}, errors.Wrap(err, "Failed to start Protos instance")
 	}
 
 	// get info about the instance
 	instanceInfo, err := client.GetInstanceInfo(vmID)
 	if err != nil {
-		return errors.Wrap(err, "Failed to get Protos instance info")
+		return cloud.InstanceInfo{}, errors.Wrap(err, "Failed to get Protos instance info")
 	}
 
 	instanceInfo.KeySeed = key.Seed()
 	err = dbp.SaveInstance(instanceInfo)
 	if err != nil {
-		return errors.Wrapf(err, "Failed to save instance '%s'", instanceName)
+		return cloud.InstanceInfo{}, errors.Wrapf(err, "Failed to save instance '%s'", instanceName)
 	}
 
-	return nil
+	return instanceInfo, nil
 }
 
 func deleteInstance(name string) error {
@@ -568,7 +569,7 @@ func tunnelInstance(name string) error {
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 	go catchSignals(sigs, quit)
 
-	log.Infof("SSH tunnel ready. Use 'http://localhost:%d/ to access the instance dashboard'. Once finished, press CTRL+C to terminate the SSH tunnel", localPort)
+	log.Infof("SSH tunnel ready. Use 'http://localhost:%d/' to access the instance dashboard. Once finished, press CTRL+C to terminate the SSH tunnel", localPort)
 
 	// waiting for a SIGTERM or SIGINT
 	<-quit
