@@ -105,6 +105,24 @@ func (sw *scaleway) GetInfo() ProviderInfo {
 // Instance methods
 //
 
+func (sw *scaleway) deleteSSHkey(name string) error {
+	keysResp, err := sw.accountAPI.ListSSHKeys(&account.ListSSHKeysRequest{})
+	if err != nil {
+		return errors.Wrap(err, "Failed to get SSH keys")
+	}
+	for _, k := range keysResp.SSHKeys {
+		if k.Name == name {
+			log.Infof("Deleting SSH key '%s'", name)
+			err = sw.accountAPI.DeleteSSHKey(&account.DeleteSSHKeyRequest{SSHKeyID: k.ID})
+			if err != nil {
+				return errors.Wrapf(err, "Failed to delete SSH key '%s'", name)
+			}
+			return nil
+		}
+	}
+	return errors.Errorf("Could not find an SSH key named '%s'", name)
+}
+
 // NewInstance creates a new Protos instance on Scaleway
 func (sw *scaleway) NewInstance(name string, imageID string, pubKey string) (string, error) {
 
@@ -168,9 +186,17 @@ func (sw *scaleway) NewInstance(name string, imageID string, pubKey string) (str
 }
 
 func (sw *scaleway) DeleteInstance(id string) error {
-	err := sw.instanceAPI.DeleteServer(&instance.DeleteServerRequest{Zone: sw.location, ServerID: id})
+	info, err := sw.GetInstanceInfo(id)
+	if err != nil {
+		return errors.Wrapf(err, "Failed to retrieve instance '%s'", id)
+	}
+	err = sw.instanceAPI.DeleteServer(&instance.DeleteServerRequest{Zone: sw.location, ServerID: id})
 	if err != nil {
 		return errors.Wrapf(err, "Failed to delete instance '%s'", id)
+	}
+	err = sw.deleteSSHkey(info.Name)
+	if err != nil {
+		return errors.Wrapf(err, "Failed to delete SSH key for instance '%s'", id)
 	}
 	return nil
 }
