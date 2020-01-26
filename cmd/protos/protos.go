@@ -39,8 +39,21 @@ func main() {
 			{
 				Name:  "init",
 				Usage: "Initializes Protos locally and deploys an instance in one of the supported clouds",
-				Action: func(c *cli.Context) error {
-					return protosInit()
+				Subcommands: []*cli.Command{
+					{
+						Name:  "db",
+						Usage: "Initialize local database",
+						Action: func(c *cli.Context) error {
+							return protosDBInit()
+						},
+					},
+					{
+						Name:  "full",
+						Usage: "Initialize a protos instance. Created local db, adds a cloud provider and a Protos instance.",
+						Action: func(c *cli.Context) error {
+							return protosFullInit()
+						},
+					},
 				},
 			},
 			{

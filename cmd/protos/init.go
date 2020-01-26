@@ -2,9 +2,6 @@ package main
 
 import (
 	"fmt"
-	"os"
-	"os/signal"
-	"syscall"
 
 	survey "github.com/AlecAivazis/survey/v2"
 	"github.com/pkg/errors"
@@ -12,7 +9,21 @@ import (
 	ssh "github.com/protosio/cli/internal/ssh"
 )
 
-func protosInit() error {
+func protosDBInit() error {
+	// create Protos DB
+	log.Info("Initializing DB")
+	dbPath, err := db.Init()
+	if err != nil {
+		return errors.Wrap(err, "Failed to initialize Protos DB")
+	}
+	dbp, err = db.Open(dbPath)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func protosFullInit() error {
 
 	// create Protos DB
 	dbPath, err := db.Init()
