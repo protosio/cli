@@ -142,6 +142,32 @@ func main() {
 						},
 					},
 					{
+						Name:      "start",
+						ArgsUsage: "<name>",
+						Usage:     "Power on instance",
+						Action: func(c *cli.Context) error {
+							name := c.Args().Get(0)
+							if name == "" {
+								cli.ShowSubcommandHelp(c)
+								os.Exit(1)
+							}
+							return startInstance(name)
+						},
+					},
+					{
+						Name:      "stop",
+						ArgsUsage: "<name>",
+						Usage:     "Power off instance",
+						Action: func(c *cli.Context) error {
+							name := c.Args().Get(0)
+							if name == "" {
+								cli.ShowSubcommandHelp(c)
+								os.Exit(1)
+							}
+							return stopInstance(name)
+						},
+					},
+					{
 						Name:      "tunnel",
 						ArgsUsage: "<name>",
 						Usage:     "Creates SSH encrypted tunnel to instance dashboard",
@@ -448,6 +474,52 @@ func deleteInstance(name string) error {
 		}
 	}
 	return dbp.DeleteInstance(name)
+}
+
+func startInstance(name string) error {
+	instance, err := dbp.GetInstance(name)
+	if err != nil {
+		return errors.Wrapf(err, "Could not retrieve instance '%s'", name)
+	}
+	cloudInfo, err := dbp.GetCloud(instance.CloudName)
+	if err != nil {
+		return errors.Wrapf(err, "Could not retrieve cloud '%s'", name)
+	}
+	client := cloudInfo.Client()
+	err = client.Init(cloudInfo.Auth, instance.Location)
+	if err != nil {
+		return errors.Wrapf(err, "Could not init cloud '%s'", name)
+	}
+
+	log.Infof("Starting instance '%s' (%s)", instance.Name, instance.VMID)
+	err = client.StartInstance(instance.VMID)
+	if err != nil {
+		return errors.Wrapf(err, "Could not start instance '%s'", name)
+	}
+	return nil
+}
+
+func stopInstance(name string) error {
+	instance, err := dbp.GetInstance(name)
+	if err != nil {
+		return errors.Wrapf(err, "Could not retrieve instance '%s'", name)
+	}
+	cloudInfo, err := dbp.GetCloud(instance.CloudName)
+	if err != nil {
+		return errors.Wrapf(err, "Could not retrieve cloud '%s'", name)
+	}
+	client := cloudInfo.Client()
+	err = client.Init(cloudInfo.Auth, instance.Location)
+	if err != nil {
+		return errors.Wrapf(err, "Could not init cloud '%s'", name)
+	}
+
+	log.Infof("Stopping instance '%s' (%s)", instance.Name, instance.VMID)
+	err = client.StopInstance(instance.VMID)
+	if err != nil {
+		return errors.Wrapf(err, "Could not stop instance '%s'", name)
+	}
+	return nil
 }
 
 func tunnelInstance(name string) error {
