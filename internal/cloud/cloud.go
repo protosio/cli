@@ -49,6 +49,14 @@ type InstanceInfo struct {
 	CloudType Type
 	CloudName string
 	Location  string
+	Volumes   []VolumeInfo
+}
+
+// VolumeInfo holds information about a data volume
+type VolumeInfo struct {
+	VolumeID string
+	Name     string
+	Size     uint64
 }
 
 // Provider allows interactions with cloud instances and images

@@ -210,6 +210,9 @@ func (sw *scaleway) GetInstanceInfo(id string) (InstanceInfo, error) {
 	if resp.Server.PublicIP != nil {
 		info.PublicIP = resp.Server.PublicIP.Address.String()
 	}
+	for _, svol := range resp.Server.Volumes {
+		info.Volumes = append(info.Volumes, VolumeInfo{VolumeID: svol.ID, Name: svol.Name, Size: uint64(svol.Size)})
+	}
 	return info, nil
 }
 

@@ -431,10 +431,21 @@ func deleteInstance(name string) error {
 	if err != nil {
 		return errors.Wrapf(err, "Could not stop instance '%s'", name)
 	}
+	vmInfo, err := client.GetInstanceInfo(instance.VMID)
+	if err != nil {
+		return errors.Wrapf(err, "Failed to get details for instance '%s'", name)
+	}
 	log.Infof("Deleting instance '%s' (%s)", instance.Name, instance.VMID)
 	err = client.DeleteInstance(instance.VMID)
 	if err != nil {
 		return errors.Wrapf(err, "Could not delete instance '%s'", name)
+	}
+	for _, vol := range vmInfo.Volumes {
+		log.Infof("Deleting volume '%s' (%s) for instance '%s'", vol.Name, vol.VolumeID, name)
+		err = client.DeleteVolume(vol.VolumeID)
+		if err != nil {
+			log.Errorf("Failed to delete volume '%s': %s", vol.Name, err.Error())
+		}
 	}
 	return dbp.DeleteInstance(name)
 }
