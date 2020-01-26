@@ -208,10 +208,18 @@ func main() {
 		return nil
 	}
 
+	app.After = func(c *cli.Context) error {
+		if dbp != nil {
+			return dbp.Close()
+		}
+		return nil
+	}
+
 	err := app.Run(os.Args)
 	if err != nil {
 		log.Fatal(err)
 	}
+
 }
 
 type userDetails struct {
