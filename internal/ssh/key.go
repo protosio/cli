@@ -20,7 +20,7 @@ func (k Key) Public() string {
 }
 
 func (k Key) Seed() []byte {
-	return k.private
+	return k.private[:32]
 }
 
 func (k Key) EncodePrivateKeytoPEM() string {

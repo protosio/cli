@@ -21,8 +21,8 @@ func GenerateKey() (Key, error) {
 	return key, nil
 }
 
-// NewFromSeed takes an ed25519 key seed and return a Key
-func NewFromSeed(seed []byte) (Key, error) {
+// NewKeyFromSeed takes an ed25519 key seed and return a Key
+func NewKeyFromSeed(seed []byte) (Key, error) {
 	key := Key{}
 	if len(seed) != 32 {
 		return key, errors.Errorf("Can't create key from seed. Seed has incorrect length: %d bytes", len(seed))

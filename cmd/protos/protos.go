@@ -447,7 +447,7 @@ func tunnelInstance(name string) error {
 	if len(instanceInfo.KeySeed) == 0 {
 		return errors.Errorf("Instance '%s' is missing its SSH key", name)
 	}
-	key, err := ssh.NewFromSeed(instanceInfo.KeySeed)
+	key, err := ssh.NewKeyFromSeed(instanceInfo.KeySeed)
 	if err != nil {
 		return errors.Wrapf(err, "Instance '%s' has an invalid SSH key", name)
 	}
