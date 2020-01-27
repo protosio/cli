@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"text/tabwriter"
 
@@ -358,6 +359,7 @@ func infoCloudProvider(name string) error {
 	}
 	fmt.Printf("Name: %s\n", cloud.Name)
 	fmt.Printf("Type: %s\n", cloud.Type.String())
+	fmt.Printf("Supported locations: %s\n", strings.Join(locations, " | "))
 	if err != nil {
 		fmt.Printf("Status: NOT OK (%s)\n", err.Error())
 	} else {
