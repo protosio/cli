@@ -19,6 +19,6 @@ require (
 	github.com/vmihailenco/msgpack v4.0.4+incompatible // indirect
 	golang.org/x/crypto v0.0.0-20191122220453-ac88ee75c92c
 	golang.org/x/net v0.0.0-20190628185345-da137c7871d7 // indirect
-	google.golang.org/appengine v1.6.1 // indirect
+	google.golang.org/appengine v1.6.1
 	gopkg.in/check.v1 v1.0.0-20180628173108-788fd7840127 // indirect
 )

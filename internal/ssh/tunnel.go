@@ -21,37 +21,75 @@ type Tunnel struct {
 	localPort int
 	target    string
 	log       *logrus.Logger
-	connMap   []chan interface{}
+	connMap   []chan bool
 }
 
-func connCopy(w io.Writer, r io.ReadCloser, cancel <-chan bool, log *logrus.Logger) {
-	errChan := make(chan error)
+type forwarder struct {
+	log    *logrus.Logger
+	closed bool
+	errsig chan bool
+	close  chan bool
+	lconn  net.Conn
+	rconn  net.Conn
+}
 
-	// Execute the io.Copy asynchronously so we can wait for cancel events
-	go func() {
-		defer func() {
-			// Catch panic and convert to a normal error
-			if err := recover(); err != nil {
-				errChan <- fmt.Errorf("%s", err)
-			}
-		}()
-		_, err := io.Copy(w, r)
-		select {
-		case errChan <- err:
-		default:
-		}
-		close(errChan)
-	}()
-
-	// Wait for the client to close the connection
-	select {
-	case err := <-errChan:
+func (t *forwarder) pipe(src, dst net.Conn, name string) {
+	buff := make([]byte, 0xffff)
+	for {
+		// read from the connection
+		n, err := src.Read(buff)
 		if err != nil {
-			log.Errorf("Failed to copy data over SSH tunnel: %s", err.Error())
+			t.errSig(fmt.Sprintf("Read failed from '%s' -> '%s' (%s): ", src.RemoteAddr(), src.LocalAddr(), name), err)
+			dst.Close()
+			return
 		}
+		b := buff[:n]
+
+		// write to the other connection
+		n, err = dst.Write(b)
+		if err != nil {
+			t.errSig(fmt.Sprintf("Write failed to '%s' -> '%s' (%s): ", dst.LocalAddr(), dst.RemoteAddr(), name), err)
+			src.Close()
+			return
+		}
+	}
+}
+
+func (t *forwarder) errSig(s string, err error) {
+	if t.closed {
 		return
-	case <-cancel:
-		return
+	}
+	if err != io.EOF {
+		t.log.Error(s, err)
+	}
+	t.errsig <- true
+	t.closed = true
+}
+
+func (t *forwarder) proxy() {
+	t.log.Debugf("Started forwarder for %p", t.lconn)
+	go t.pipe(t.lconn, t.rconn, "outgoing")
+	go t.pipe(t.rconn, t.lconn, "incoming")
+
+	select {
+	case <-t.errsig:
+		t.log.Debugf("Forwarder %p closed because of underlying connections", t.lconn)
+	case <-t.close:
+		t.closed = true
+		t.lconn.Close()
+		t.rconn.Close()
+		t.log.Debugf("Forwarder %p closed by user", t.lconn)
+	}
+}
+
+func newForwarder(lconn, rconn net.Conn, close chan bool, log *logrus.Logger) *forwarder {
+	return &forwarder{
+		lconn:  lconn,
+		rconn:  rconn,
+		closed: false,
+		errsig: make(chan bool),
+		close:  close,
+		log:    log,
 	}
 }
 
@@ -81,6 +119,7 @@ func (t *Tunnel) Start() (int, error) {
 	// accept local connections and start the forwarding
 	go func() {
 		for {
+			// accept a connection on localhost
 			localConn, err := t.listener.Accept()
 			if err != nil {
 				if strings.Contains(err.Error(), "use of closed network connection") {
@@ -90,8 +129,17 @@ func (t *Tunnel) Start() (int, error) {
 				t.log.Errorf("Failed to accept connection via the SSH tunnel: %s", err)
 				continue
 			}
-			close := make(chan interface{})
-			go t.forward(localConn, t.sshConn, close)
+
+			// open a connection via the SSH connection, to the Protos backend
+			remoteConn, err := t.sshConn.Dial("tcp", t.target)
+			if err != nil {
+				t.log.Errorf("Failed to establish remote connection (%s) over SSH tunnel (%s): %s", t.target, t.sshHost, err)
+				return
+			}
+
+			close := make(chan bool, 1)
+			forwarder := newForwarder(localConn, remoteConn, close, t.log)
+			go forwarder.proxy()
 			t.connMap = append(t.connMap, close)
 		}
 	}()
@@ -115,26 +163,6 @@ func (t *Tunnel) Close() error {
 	}
 
 	return nil
-}
-
-func (t *Tunnel) forward(localConn net.Conn, sshConn *ssh.Client, close chan interface{}) {
-	t.log.Debug("New forwarded connection")
-	remoteConn, err := sshConn.Dial("tcp", t.target)
-	if err != nil {
-		t.log.Errorf("Failed to establish remote connection (%s) over SSH tunnel (%s): %s", t.target, t.sshHost, err)
-		return
-	}
-
-	cancel1 := make(chan bool, 1)
-	cancel2 := make(chan bool, 1)
-	go connCopy(localConn, remoteConn, cancel1, t.log)
-	go connCopy(remoteConn, localConn, cancel2, t.log)
-	<-close
-	t.log.Debug("Close signal received, stopping forwarder")
-	cancel1 <- true
-	cancel2 <- true
-	_ = localConn.Close()
-	_ = remoteConn.Close()
 }
 
 // NewTunnel creates and returns an SSHTunnel
