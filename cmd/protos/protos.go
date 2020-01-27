@@ -194,6 +194,19 @@ func main() {
 							return tunnelInstance(name)
 						},
 					},
+					{
+						Name:      "key",
+						ArgsUsage: "<name>",
+						Usage:     "Outputs to stdout the SSH key associated with the instance",
+						Action: func(c *cli.Context) error {
+							name := c.Args().Get(0)
+							if name == "" {
+								cli.ShowSubcommandHelp(c)
+								os.Exit(1)
+							}
+							return keyInstance(name)
+						},
+					},
 				},
 			},
 		},
@@ -580,5 +593,21 @@ func tunnelInstance(name string) error {
 		return errors.Wrap(err, "Error while terminating the SSH tunnel")
 	}
 	log.Info("SSH tunnel terminated successfully")
+	return nil
+}
+
+func keyInstance(name string) error {
+	instanceInfo, err := dbp.GetInstance(name)
+	if err != nil {
+		return errors.Wrapf(err, "Could not retrieve instance '%s'", name)
+	}
+	if len(instanceInfo.KeySeed) == 0 {
+		return errors.Errorf("Instance '%s' is missing its SSH key", name)
+	}
+	key, err := ssh.NewKeyFromSeed(instanceInfo.KeySeed)
+	if err != nil {
+		return errors.Wrapf(err, "Instance '%s' has an invalid SSH key", name)
+	}
+	fmt.Print(key.EncodePrivateKeytoPEM())
 	return nil
 }
