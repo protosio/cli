@@ -437,6 +437,17 @@ func addInstance(instanceName string, cloudName string) (cloud.InstanceInfo, err
 	}
 	log.Infof("Instance with ID '%s' deployed", vmID)
 
+	// get instance info
+	instanceInfo, err := client.GetInstanceInfo(vmID)
+	if err != nil {
+		return cloud.InstanceInfo{}, errors.Wrap(err, "Failed to get Protos instance info")
+	}
+	// save of the instance information
+	err = dbp.SaveInstance(instanceInfo)
+	if err != nil {
+		return cloud.InstanceInfo{}, errors.Wrapf(err, "Failed to save instance '%s'", instanceName)
+	}
+
 	// create protos data volume
 	log.Infof("Creating data volume for Protos instance '%s'", instanceName)
 	volumeID, err := client.NewVolume(instanceName, 30000)
@@ -457,12 +468,12 @@ func addInstance(instanceName string, cloudName string) (cloud.InstanceInfo, err
 		return cloud.InstanceInfo{}, errors.Wrap(err, "Failed to start Protos instance")
 	}
 
-	// get info about the instance
-	instanceInfo, err := client.GetInstanceInfo(vmID)
+	// get instance info again
+	instanceInfo, err = client.GetInstanceInfo(vmID)
 	if err != nil {
 		return cloud.InstanceInfo{}, errors.Wrap(err, "Failed to get Protos instance info")
 	}
-
+	// final save of the instance information
 	instanceInfo.KeySeed = key.Seed()
 	err = dbp.SaveInstance(instanceInfo)
 	if err != nil {
