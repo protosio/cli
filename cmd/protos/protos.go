@@ -197,7 +197,7 @@ func main() {
 					{
 						Name:      "key",
 						ArgsUsage: "<name>",
-						Usage:     "Outputs to stdout the SSH key associated with the instance",
+						Usage:     "Prints to stdout the SSH key associated with the instance",
 						Action: func(c *cli.Context) error {
 							name := c.Args().Get(0)
 							if name == "" {
