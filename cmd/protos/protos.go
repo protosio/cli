@@ -379,14 +379,14 @@ func listInstances() error {
 	}
 
 	w := new(tabwriter.Writer)
-	w.Init(os.Stdout, 8, 8, 0, '\t', 0)
+	w.Init(os.Stdout, 0, 0, 2, ' ', 0)
 
 	defer w.Flush()
 
-	fmt.Fprintf(w, " %s\t%s\t%s\t%s\t%s\t", "Name", "IP", "Cloud", "VM ID", "Status")
-	fmt.Fprintf(w, "\n %s\t%s\t%s\t%s\t%s\t", "----", "--", "-----", "-----", "------")
+	fmt.Fprintf(w, " %s\t%s\t%s\t%s\t%s\t%s\t", "Name", "IP", "Cloud", "VM ID", "Location", "Status")
+	fmt.Fprintf(w, "\n %s\t%s\t%s\t%s\t%s\t%s\t", "----", "--", "-----", "-----", "--------", "------")
 	for _, instance := range instances {
-		fmt.Fprintf(w, "\n %s\t%s\t%s\t%s\t%s\t", instance.Name, instance.PublicIP, instance.CloudName, instance.VMID, "n/a")
+		fmt.Fprintf(w, "\n %s\t%s\t%s\t%s\t%s\t%s\t", instance.Name, instance.PublicIP, instance.CloudName, instance.VMID, instance.Location, "n/a")
 	}
 	fmt.Fprint(w, "\n")
 	return nil
