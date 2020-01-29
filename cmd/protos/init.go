@@ -7,7 +7,29 @@ import (
 	"github.com/pkg/errors"
 	"github.com/protosio/cli/internal/db"
 	ssh "github.com/protosio/cli/internal/ssh"
+	"github.com/urfave/cli/v2"
 )
+
+var cmdInit *cli.Command = &cli.Command{
+	Name:  "init",
+	Usage: "Initializes Protos locally and deploys an instance in one of the supported clouds",
+	Subcommands: []*cli.Command{
+		{
+			Name:  "db",
+			Usage: "Initialize local database",
+			Action: func(c *cli.Context) error {
+				return protosDBInit()
+			},
+		},
+		{
+			Name:  "full",
+			Usage: "Initialize a protos instance. Created local db, adds a cloud provider and a Protos instance.",
+			Action: func(c *cli.Context) error {
+				return protosFullInit()
+			},
+		},
+	},
+}
 
 func protosDBInit() error {
 	// create Protos DB
