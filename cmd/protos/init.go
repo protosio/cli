@@ -48,7 +48,7 @@ func protosFullInit() error {
 	var cloudName string
 	err = survey.Ask(cloudNameQuestion, &cloudName)
 
-	_, err = addCloudProvider(cloudName)
+	cloudProvider, err := addCloudProvider(cloudName)
 	if err != nil {
 		return err
 	}
@@ -57,7 +57,16 @@ func protosFullInit() error {
 	// Protos instance creation steps
 	//
 
-	// get a name to use internally for this specific cloud provider + credentials. This allows for adding multiple accounts of the same cloud
+	// select one of the supported locations by this particular cloud
+	var cloudLocation string
+	supportedLocations := cloudProvider.SupportedLocations()
+	cloudLocationQuestions := surveySelect(supportedLocations, fmt.Sprintf("Choose one of the following supported locations for '%s':", cloudProvider.GetInfo().Type))
+	err = survey.AskOne(cloudLocationQuestions, &cloudLocation)
+	if err != nil {
+		return errors.Wrap(err, "Failed to initialize Protos")
+	}
+
+	// get a name to use internally for this instance. This name should be reflected accordingly in the cloud provider account
 	vmNameQuestion := []*survey.Question{{
 		Name:     "name",
 		Prompt:   &survey.Input{Message: "Write a name used to identify Protos instance that will be deployed next:"},
@@ -66,7 +75,8 @@ func protosFullInit() error {
 	var vmName string
 	err = survey.Ask(vmNameQuestion, &vmName)
 
-	instanceInfo, err := addInstance(vmName, cloudName)
+	// deploy the vm
+	instanceInfo, err := deployInstance(vmName, cloudName, cloudLocation)
 	if err != nil {
 		return errors.Wrap(err, "Failed to initialize Protos")
 	}

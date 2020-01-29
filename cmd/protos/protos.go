@@ -24,6 +24,7 @@ func main() {
 	log = logrus.New()
 	var loglevel string
 	var cloudName string
+	var cloudLocation string
 	app := &cli.App{
 		Name:    "protos",
 		Usage:   "Command-line client for Protos",
@@ -132,6 +133,12 @@ func main() {
 								Required:    true,
 								Destination: &cloudName,
 							},
+							&cli.StringFlag{
+								Name:        "location",
+								Usage:       "Specify one of the supported `LOCATION`s to deploy the instance in (cloud specific)",
+								Required:    true,
+								Destination: &cloudLocation,
+							},
 						},
 						Action: func(c *cli.Context) error {
 							name := c.Args().Get(0)
@@ -139,7 +146,7 @@ func main() {
 								cli.ShowSubcommandHelp(c)
 								os.Exit(1)
 							}
-							_, err := addInstance(name, cloudName)
+							_, err := deployInstance(name, cloudName, cloudLocation)
 							return err
 						},
 					},
@@ -317,17 +324,9 @@ func addCloudProvider(cloudName string) (cloud.Provider, error) {
 		return nil, err
 	}
 
-	// get cloud provider location
-	var cloudLocation string
-	supportedLocations := client.SupportedLocations()
-	cloudLocationQuestions := surveySelect(supportedLocations, fmt.Sprintf("Choose one of the following supported locations for '%s':", cloudType))
-	err = survey.AskOne(cloudLocationQuestions, &cloudLocation)
-	if err != nil {
-		return nil, err
-	}
-
 	// init cloud client
-	err = client.Init(transformCredentials(cloudCredentials), cloudLocation)
+	supportedLocations := client.SupportedLocations()
+	err = client.Init(transformCredentials(cloudCredentials), supportedLocations[0])
 	if err != nil {
 		return nil, err
 	}
@@ -392,7 +391,7 @@ func listInstances() error {
 	return nil
 }
 
-func addInstance(instanceName string, cloudName string) (cloud.InstanceInfo, error) {
+func deployInstance(instanceName string, cloudName string, cloudLocation string) (cloud.InstanceInfo, error) {
 
 	// init cloud
 	provider, err := dbp.GetCloud(cloudName)
@@ -400,8 +399,7 @@ func addInstance(instanceName string, cloudName string) (cloud.InstanceInfo, err
 		return cloud.InstanceInfo{}, errors.Wrapf(err, "Could not retrieve cloud '%s'", cloudName)
 	}
 	client := provider.Client()
-	locations := client.SupportedLocations()
-	err = client.Init(provider.Auth, locations[0])
+	err = client.Init(provider.Auth, cloudLocation)
 	if err != nil {
 		return cloud.InstanceInfo{}, errors.Wrapf(err, "Failed to connect to cloud provider '%s'(%s) API", cloudName, provider.Type.String())
 	}
