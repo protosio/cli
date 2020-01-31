@@ -9,6 +9,7 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/protosio/cli/internal/cloud"
+	"github.com/protosio/cli/internal/release"
 	ssh "github.com/protosio/cli/internal/ssh"
 	"github.com/urfave/cli/v2"
 )
@@ -41,6 +42,12 @@ var cmdInstance *cli.Command = &cli.Command{
 					Required:    true,
 					Destination: &cloudLocation,
 				},
+				&cli.StringFlag{
+					Name:        "version",
+					Usage:       "Specify Protos `VERSION` to deploy",
+					Required:    false,
+					Destination: &protosVersion,
+				},
 			},
 			Action: func(c *cli.Context) error {
 				name := c.Args().Get(0)
@@ -48,7 +55,24 @@ var cmdInstance *cli.Command = &cli.Command{
 					cli.ShowSubcommandHelp(c)
 					os.Exit(1)
 				}
-				_, err := deployInstance(name, cloudName, cloudLocation)
+				releases, err := getProtosReleases()
+				if err != nil {
+					return err
+				}
+				var release release.Release
+				if protosVersion == "" {
+					release, err = releases.GetLatest()
+					if err != nil {
+						return err
+					}
+				} else {
+					release, err = releases.GetVersion(protosVersion)
+					if err != nil {
+						return err
+					}
+				}
+
+				_, err = deployInstance(name, cloudName, cloudLocation, release)
 				return err
 			},
 		},
@@ -144,7 +168,8 @@ func listInstances() error {
 	return nil
 }
 
-func deployInstance(instanceName string, cloudName string, cloudLocation string) (cloud.InstanceInfo, error) {
+func deployInstance(instanceName string, cloudName string, cloudLocation string, release release.Release) (cloud.InstanceInfo, error) {
+	protosImage := "protos-" + release.Version
 
 	// init cloud
 	provider, err := dbp.GetCloud(cloudName)
@@ -163,15 +188,19 @@ func deployInstance(instanceName string, cloudName string, cloudLocation string)
 	if err != nil {
 		return cloud.InstanceInfo{}, errors.Wrap(err, "Failed to initialize Protos")
 	}
-	if id, found := images["protos-image"]; found == true {
-		log.Infof("Found latest Protos image (%s) in your infra cloud account", id)
+	if id, found := images[protosImage]; found == true {
+		log.Infof("Found Protos image version '%s'  in your cloud account", protosImage)
 		imageID = id
 	} else {
 		// upload protos image
-		log.Info("Latest Protos image not in your infra cloud account. Adding it.")
-		imageID, err = client.AddImage("https://releases.protos.io/test/scaleway-efi.iso", "4b49901e65420b55170d95768f431595")
-		if err != nil {
-			return cloud.InstanceInfo{}, errors.Wrap(err, "Failed to initialize Protos")
+		if image, found := release.CloudImages["scaleway"]; found {
+			log.Info("Latest Protos image not in your infra cloud account. Adding it.")
+			imageID, err = client.AddImage(image.URL, image.Digest, release.Version)
+			if err != nil {
+				return cloud.InstanceInfo{}, errors.Wrap(err, "Failed to initialize Protos")
+			}
+		} else {
+			return cloud.InstanceInfo{}, errors.Errorf("Could not find a Scaleway release for Protos version '%s'", release.Version)
 		}
 	}
 

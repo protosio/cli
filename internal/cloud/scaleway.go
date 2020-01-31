@@ -1,6 +1,7 @@
 package cloud
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/pkg/errors"
@@ -258,7 +259,7 @@ func (sw *scaleway) GetImages() (map[string]string, error) {
 	return images, nil
 }
 
-func (sw *scaleway) AddImage(url string, hash string) (string, error) {
+func (sw *scaleway) AddImage(url string, hash string, version string) (string, error) {
 
 	//
 	// create and add ssh key to account
@@ -312,12 +313,21 @@ func (sw *scaleway) AddImage(url string, hash string) (string, error) {
 	//
 	// wite Protos image to volume
 	//
+	localISO := "/tmp/protos-scaleway.iso"
 
 	log.Info("Downloading Protos image")
-	out, err := ssh.ExecuteCommand("wget -P /tmp https://releases.protos.io/test/scaleway-efi.iso", sshClient)
+	out, err := ssh.ExecuteCommand("wget -O "+localISO+" "+url, sshClient)
 	if err != nil {
 		log.Errorf("Error downloading Protos VM image: %s", out)
 		return "", errors.Wrap(err, "Failed to add Protos image to Scaleway. Error downloading Protos VM image")
+	}
+
+	log.Info("Checking image integrity")
+	cmdString := fmt.Sprintf("openssl dgst -r -sha256 %s | awk '{ print $1 }' | { read digest; if [ \"$digest\" = \"%s\" ]; then true; else false; fi }", localISO, hash)
+	out, err = ssh.ExecuteCommand(cmdString, sshClient)
+	if err != nil {
+		log.Errorf("Image integrity check failed: %s: %s", out, err.Error())
+		return "", errors.Wrap(err, "Failed to add Protos image to Scaleway. Error downloading Protos VM image. Integrity check failed")
 	}
 
 	out, err = ssh.ExecuteCommand("ls /dev/vdb", sshClient)
@@ -327,7 +337,7 @@ func (sw *scaleway) AddImage(url string, hash string) (string, error) {
 	}
 
 	log.Info("Writing Protos image to volume")
-	out, err = ssh.ExecuteCommand("dd if=/tmp/scaleway-efi.iso of=/dev/vdb", sshClient)
+	out, err = ssh.ExecuteCommand("dd if="+localISO+" of=/dev/vdb", sshClient)
 	if err != nil {
 		log.Errorf("Error while writing image to volume: %s", out)
 		return "", errors.Wrap(err, "Failed to add Protos image to Scaleway. Error while writing image to volume")
@@ -360,7 +370,7 @@ func (sw *scaleway) AddImage(url string, hash string) (string, error) {
 	log.Info("Creating snapshot from volume")
 	snapshotResp, err := sw.instanceAPI.CreateSnapshot(&instance.CreateSnapshotRequest{
 		VolumeID: vol.ID,
-		Name:     "protos-image-snapshot",
+		Name:     "protos-snapshot-" + version,
 		Zone:     sw.location,
 	})
 	if err != nil {
@@ -369,7 +379,7 @@ func (sw *scaleway) AddImage(url string, hash string) (string, error) {
 
 	log.Info("Creating image from snapshot")
 	imageResp, err := sw.instanceAPI.CreateImage(&instance.CreateImageRequest{
-		Name:       "protos-image",
+		Name:       "protos-" + version,
 		Arch:       instance.ArchX86_64,
 		RootVolume: snapshotResp.Snapshot.ID,
 		Zone:       sw.location,

@@ -5,6 +5,7 @@ go 1.13
 require (
 	github.com/AlecAivazis/survey/v2 v2.0.5
 	github.com/DataDog/zstd v1.4.4 // indirect
+	github.com/Masterminds/semver v1.5.0
 	github.com/Sereal/Sereal v0.0.0-20191211210414-3a6c62eca003 // indirect
 	github.com/asdine/genji v0.4.0
 	github.com/asdine/storm v2.1.2+incompatible

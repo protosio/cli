@@ -75,7 +75,7 @@ type Provider interface {
 	GetInstanceInfo(id string) (InstanceInfo, error)
 	// Image methods
 	GetImages() (images map[string]string, err error)
-	AddImage(url string, hash string) (id string, err error)
+	AddImage(url string, hash string, version string) (id string, err error)
 	RemoveImage(name string) error
 	// Volume methods
 	// - size should by provided in megabytes

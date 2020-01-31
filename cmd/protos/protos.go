@@ -12,6 +12,7 @@ var log *logrus.Logger
 var dbp db.DB
 var cloudName string
 var cloudLocation string
+var protosVersion string
 
 func main() {
 	log = logrus.New()

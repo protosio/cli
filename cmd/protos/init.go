@@ -97,8 +97,18 @@ func protosFullInit() error {
 	var vmName string
 	err = survey.Ask(vmNameQuestion, &vmName)
 
+	// get latest Protos release
+	releases, err := getProtosReleases()
+	if err != nil {
+		return errors.Wrap(err, "Failed to initialize Protos")
+	}
+	latestRelease, err := releases.GetLatest()
+	if err != nil {
+		return errors.Wrap(err, "Failed to initialize Protos")
+	}
+
 	// deploy the vm
-	instanceInfo, err := deployInstance(vmName, cloudName, cloudLocation)
+	instanceInfo, err := deployInstance(vmName, cloudName, cloudLocation, latestRelease)
 	if err != nil {
 		return errors.Wrap(err, "Failed to initialize Protos")
 	}
