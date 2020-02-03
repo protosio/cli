@@ -52,7 +52,7 @@ func ExecuteCommand(cmd string, client *ssh.Client) (string, error) {
 		return "", errors.Wrap(err, "Request for pseudo terminal failed")
 	}
 
-	log.Infof("Executing (SSH) command '%s'", cmd)
+	log.Debugf("Executing (SSH) command '%s'", cmd)
 	output, err := session.CombinedOutput(cmd)
 	if err != nil {
 		return string(output), errors.Wrapf(err, "Failed to execute command '%s'", cmd)
