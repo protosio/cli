@@ -20,7 +20,7 @@ func main() {
 	app := &cli.App{
 		Name:    "protos-cli",
 		Usage:   "Command-line client for Protos",
-		Version: "0.0.0-dev",
+		Version: "0.0.0-dev.1",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:        "log, l",
