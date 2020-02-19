@@ -33,7 +33,6 @@ var cmdInit *cli.Command = &cli.Command{
 
 func protosDBInit() error {
 	// create Protos DB
-	log.Info("Initializing DB")
 	dbPath, err := db.Init()
 	if err != nil {
 		return errors.Wrap(err, "Failed to initialize Protos DB")
@@ -49,14 +48,7 @@ func protosDBInit() error {
 func protosFullInit() error {
 
 	// create Protos DB
-	dbPath, err := db.Init()
-	if err != nil {
-		return errors.Wrap(err, "Failed to initialize Protos")
-	}
-	dbp, err = db.Open(dbPath)
-	if err != nil {
-		return err
-	}
+	protosDBInit()
 
 	//
 	// add cloud provider
@@ -69,7 +61,7 @@ func protosFullInit() error {
 		Validate: survey.Required,
 	}}
 	var cloudName string
-	err = survey.Ask(cloudNameQuestion, &cloudName)
+	err := survey.Ask(cloudNameQuestion, &cloudName)
 
 	cloudProvider, err := addCloudProvider(cloudName)
 	if err != nil {
