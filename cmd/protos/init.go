@@ -42,6 +42,7 @@ func protosDBInit() error {
 	if err != nil {
 		return err
 	}
+	log.Infof("Initialized DB at: '%s'", dbPath)
 	return nil
 }
 
