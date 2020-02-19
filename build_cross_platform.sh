@@ -14,4 +14,4 @@ env GOOS=darwin GOARCH=amd64 go build -o ./bin/protos-cli_${VERSION}_darwin cmd/
 env GOOS=linux GOARCH=amd64 go build -o ./bin/protos-cli_${VERSION}_linux cmd/protos/*.go
 
 # Windows
-env GOOS=windows GOARCH=amd64 go build -o ./bin/protos-cli_${VERSION}_windows cmd/protos/*.go
+env GOOS=windows GOARCH=amd64 go build -o ./bin/protos-cli_${VERSION}_windows.exe cmd/protos/*.go
