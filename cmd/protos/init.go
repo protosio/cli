@@ -1,10 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
+	"text/tabwriter"
 
 	survey "github.com/AlecAivazis/survey/v2"
 	"github.com/pkg/errors"
+	"github.com/protosio/cli/internal/cloud"
 	"github.com/protosio/cli/internal/db"
 	ssh "github.com/protosio/cli/internal/ssh"
 	"github.com/urfave/cli/v2"
@@ -100,8 +103,25 @@ func protosFullInit() error {
 		return errors.Wrap(err, "Failed to initialize Protos")
 	}
 
+	// select one of the supported locations by this particular cloud
+	var machineType string
+	supportedMachineTypes, err := cloudProvider.SupportedMachines()
+	if err != nil {
+		return errors.Wrap(err, "Failed to initialize Protos")
+	}
+	supportedMachineTypeIDs := []string{}
+	for id := range supportedMachineTypes {
+		supportedMachineTypeIDs = append(supportedMachineTypeIDs, id)
+	}
+	machineTypesStr := createMachineTypesString(supportedMachineTypes)
+	machineTypeQuestion := surveySelect(supportedMachineTypeIDs, fmt.Sprintf("Choose one of the following supported machine types for '%s'.\n%s", cloudProvider.GetInfo().Type, machineTypesStr))
+	err = survey.AskOne(machineTypeQuestion, &machineType)
+	if err != nil {
+		return errors.Wrap(err, "Failed to initialize Protos")
+	}
+
 	// deploy the vm
-	instanceInfo, err := deployInstance(vmName, cloudName, cloudLocation, latestRelease)
+	instanceInfo, err := deployInstance(vmName, cloudName, cloudLocation, latestRelease, machineType)
 	if err != nil {
 		return errors.Wrap(err, "Failed to initialize Protos")
 	}
@@ -183,4 +203,15 @@ func getCloudCredentialsQuestions(providerName string, fields []string) []*surve
 			Validate: survey.Required})
 	}
 	return qs
+}
+
+func createMachineTypesString(machineTypes map[string]cloud.MachineSpec) string {
+	var machineTypesStr bytes.Buffer
+	w := new(tabwriter.Writer)
+	w.Init(&machineTypesStr, 8, 8, 0, ' ', 0)
+	for instanceID, instanceSpec := range machineTypes {
+		fmt.Fprintf(w, "    %s\t -  Nr of CPUs: %d,\t Memory: %d MiB,\t Storage: %d GB\t\n", instanceID, instanceSpec.Cores, instanceSpec.Memory, instanceSpec.DefaultStorage)
+	}
+	w.Flush()
+	return machineTypesStr.String()
 }

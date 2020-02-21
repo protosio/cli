@@ -80,7 +80,7 @@ type Provider interface {
 	SupportedMachines() (map[string]MachineSpec, error) // returns a map of machine ids and their hardware specifications. A user will choose the machines for their instance
 
 	// Instance methods
-	NewInstance(name string, image string, pubKey string) (id string, err error)
+	NewInstance(name string, image string, pubKey string, machineType string) (id string, err error)
 	DeleteInstance(id string) error
 	StartInstance(id string) error
 	StopInstance(id string) error

@@ -147,7 +147,7 @@ func (sw *scaleway) deleteSSHkey(name string) error {
 }
 
 // NewInstance creates a new Protos instance on Scaleway
-func (sw *scaleway) NewInstance(name string, imageID string, pubKey string) (string, error) {
+func (sw *scaleway) NewInstance(name string, imageID string, pubKey string, machineType string) (string, error) {
 
 	//
 	// create SSH key
@@ -191,7 +191,7 @@ func (sw *scaleway) NewInstance(name string, imageID string, pubKey string) (str
 	req := &instance.CreateServerRequest{
 		Name:              name,
 		Zone:              sw.location,
-		CommercialType:    "DEV1-S",
+		CommercialType:    machineType,
 		DynamicIPRequired: &ipreq,
 		EnableIPv6:        false,
 		BootType:          instance.BootTypeLocal,

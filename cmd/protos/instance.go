@@ -14,6 +14,8 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
+var machineType string
+
 var cmdInstance *cli.Command = &cli.Command{
 	Name:  "instance",
 	Usage: "Manage Protos instances",
@@ -48,6 +50,12 @@ var cmdInstance *cli.Command = &cli.Command{
 					Required:    false,
 					Destination: &protosVersion,
 				},
+				&cli.StringFlag{
+					Name:        "type",
+					Usage:       "Specify cloud machine type `TYPE` to deploy. Get it from 'cloud info' subcommand",
+					Required:    true,
+					Destination: &machineType,
+				},
 			},
 			Action: func(c *cli.Context) error {
 				name := c.Args().Get(0)
@@ -72,7 +80,7 @@ var cmdInstance *cli.Command = &cli.Command{
 					}
 				}
 
-				_, err = deployInstance(name, cloudName, cloudLocation, release)
+				_, err = deployInstance(name, cloudName, cloudLocation, release, machineType)
 				return err
 			},
 		},
@@ -168,7 +176,7 @@ func listInstances() error {
 	return nil
 }
 
-func deployInstance(instanceName string, cloudName string, cloudLocation string, release release.Release) (cloud.InstanceInfo, error) {
+func deployInstance(instanceName string, cloudName string, cloudLocation string, release release.Release, machineType string) (cloud.InstanceInfo, error) {
 	protosImage := "protos-" + release.Version
 
 	// init cloud
@@ -182,6 +190,15 @@ func deployInstance(instanceName string, cloudName string, cloudLocation string,
 		return cloud.InstanceInfo{}, errors.Wrapf(err, "Failed to connect to cloud provider '%s'(%s) API", cloudName, provider.Type.String())
 	}
 
+	// validate machine type
+	supportedMachineTypes, err := client.SupportedMachines()
+	if err != nil {
+		return cloud.InstanceInfo{}, err
+	}
+	if _, found := supportedMachineTypes[machineType]; !found {
+		return cloud.InstanceInfo{}, errors.Errorf("Machine type '%s' is not valid for Scaleway. The following types are supported: \n%s", machineType, createMachineTypesString(supportedMachineTypes))
+	}
+
 	// add image
 	imageID := ""
 	images, err := client.GetImages()
@@ -189,12 +206,12 @@ func deployInstance(instanceName string, cloudName string, cloudLocation string,
 		return cloud.InstanceInfo{}, errors.Wrap(err, "Failed to initialize Protos")
 	}
 	if id, found := images[protosImage]; found == true {
-		log.Infof("Found Protos image version '%s'  in your cloud account", protosImage)
+		log.Infof("Found Protos image version '%s' in your cloud account", release.Version)
 		imageID = id
 	} else {
 		// upload protos image
 		if image, found := release.CloudImages["scaleway"]; found {
-			log.Info("Latest Protos image not in your infra cloud account. Adding it.")
+			log.Infof("Protos image version '%s' not in your infra cloud account. Adding it.", release.Version)
 			imageID, err = client.AddImage(image.URL, image.Digest, release.Version)
 			if err != nil {
 				return cloud.InstanceInfo{}, errors.Wrap(err, "Failed to initialize Protos")
@@ -212,8 +229,8 @@ func deployInstance(instanceName string, cloudName string, cloudLocation string,
 	}
 
 	// deploy a protos instance
-	log.Infof("Deploying Protos instance '%s' using image '%s'", instanceName, imageID)
-	vmID, err := client.NewInstance(instanceName, imageID, key.Public())
+	log.Infof("Deploying instance '%s' of type '%s', using Protos version '%s' (image id '%s')", instanceName, machineType, release.Version, imageID)
+	vmID, err := client.NewInstance(instanceName, imageID, key.Public(), machineType)
 	if err != nil {
 		return cloud.InstanceInfo{}, errors.Wrap(err, "Failed to deploy Protos instance")
 	}
