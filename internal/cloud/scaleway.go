@@ -102,6 +102,28 @@ func (sw *scaleway) GetInfo() ProviderInfo {
 	return ProviderInfo{Name: sw.name, Type: Scaleway, Auth: sw.auth}
 }
 
+func (sw *scaleway) SupportedMachines() (map[string]MachineSpec, error) {
+	vms := map[string]MachineSpec{}
+	inst, err := sw.instanceAPI.ListServersTypes(&instance.ListServersTypesRequest{Zone: scw.ZoneFrPar1})
+	if err != nil {
+		return vms, errors.Wrap(err, "Failed to retrieve Scaleway instance types")
+	}
+	for id, instance := range inst.Servers {
+		if instance.Arch == "x86_64" && strings.Contains(id, "DEV") {
+			vms[id] = MachineSpec{
+				Cores:                instance.Ncpus,
+				Memory:               uint32(instance.RAM / 1048576),
+				DefaultStorage:       uint32(instance.VolumesConstraint.MinSize / 1000000000),
+				Baremetal:            instance.Baremetal,
+				Bandwidth:            uint32(*instance.Network.SumInternetBandwidth),
+				IncludedDataTransfer: 0,
+				PriceMonthly:         instance.MonthlyPrice,
+			}
+		}
+	}
+	return vms, nil
+}
+
 //
 // Instance methods
 //

@@ -59,6 +59,17 @@ type VolumeInfo struct {
 	Size     uint64
 }
 
+// MachineSpec holds information about the hardware characteristics of vm or baremetal instance
+type MachineSpec struct {
+	Cores                uint32  // Nr of cores
+	Memory               uint32  // MiB
+	DefaultStorage       uint32  // GB
+	Bandwidth            uint32  // Mbit
+	IncludedDataTransfer uint32  // GB. 0 for unlimited
+	Baremetal            bool    // true if machine is bare metal
+	PriceMonthly         float32 // no currency conversion at the moment. Each cloud reports this differently
+}
+
 // Provider allows interactions with cloud instances and images
 type Provider interface {
 	// Config methods
@@ -66,6 +77,7 @@ type Provider interface {
 	SupportedLocations() (locations []string)           // returns the supported locations for a specific cloud provider
 	Init(auth map[string]string, location string) error // a cloud provider always needs to have Init called to configure it
 	GetInfo() ProviderInfo                              // returns information that can be stored in the database and allows for re-creation of the provider
+	SupportedMachines() (map[string]MachineSpec, error) // returns a map of machine ids and their hardware specifications. A user will choose the machines for their instance
 
 	// Instance methods
 	NewInstance(name string, image string, pubKey string) (id string, err error)

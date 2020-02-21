@@ -145,11 +145,22 @@ func infoCloudProvider(name string) error {
 	locations := client.SupportedLocations()
 	err = client.Init(cloud.Auth, locations[0])
 	if err != nil {
-		return errors.Wrapf(err, "Failed to connect to cloud provider '%s'(%s) API", name, cloud.Type.String())
+		log.Error(errors.Wrapf(err, "Error reaching cloud provider '%s'(%s) API", name, cloud.Type.String()))
+	}
+	machineTypes, err := client.SupportedMachines()
+	if err != nil {
+		log.Error(errors.Wrapf(err, "Error reaching cloud provider '%s'(%s) API", name, cloud.Type.String()))
 	}
 	fmt.Printf("Name: %s\n", cloud.Name)
 	fmt.Printf("Type: %s\n", cloud.Type.String())
 	fmt.Printf("Supported locations: %s\n", strings.Join(locations, " | "))
+	fmt.Printf("Supported machine types: \n")
+	w := new(tabwriter.Writer)
+	w.Init(os.Stdout, 8, 8, 0, ' ', 0)
+	for instanceID, instanceSpec := range machineTypes {
+		fmt.Fprintf(w, "    %s\t -  Nr of CPUs: %d,\t Memory: %d MiB,\t Storage: %d GB\t\n", instanceID, instanceSpec.Cores, instanceSpec.Memory, instanceSpec.DefaultStorage)
+	}
+	w.Flush()
 	if err != nil {
 		fmt.Printf("Status: NOT OK (%s)\n", err.Error())
 	} else {
