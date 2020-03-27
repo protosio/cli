@@ -157,7 +157,7 @@ var cmdInstance *cli.Command = &cli.Command{
 //
 
 func listInstances() error {
-	instances, err := dbp.GetAllInstances()
+	instances, err := envi.DB.GetAllInstances()
 	if err != nil {
 		return err
 	}
@@ -179,7 +179,7 @@ func listInstances() error {
 func deployInstance(instanceName string, cloudName string, cloudLocation string, release release.Release, machineType string) (cloud.InstanceInfo, error) {
 
 	// init cloud
-	provider, err := dbp.GetCloud(cloudName)
+	provider, err := envi.DB.GetCloud(cloudName)
 	if err != nil {
 		return cloud.InstanceInfo{}, errors.Wrapf(err, "Could not retrieve cloud '%s'", cloudName)
 	}
@@ -246,7 +246,7 @@ func deployInstance(instanceName string, cloudName string, cloudLocation string,
 		return cloud.InstanceInfo{}, errors.Wrap(err, "Failed to get Protos instance info")
 	}
 	// save of the instance information
-	err = dbp.SaveInstance(instanceInfo)
+	err = envi.DB.SaveInstance(instanceInfo)
 	if err != nil {
 		return cloud.InstanceInfo{}, errors.Wrapf(err, "Failed to save instance '%s'", instanceName)
 	}
@@ -278,7 +278,7 @@ func deployInstance(instanceName string, cloudName string, cloudLocation string,
 	}
 	// final save of the instance information
 	instanceInfo.KeySeed = key.Seed()
-	err = dbp.SaveInstance(instanceInfo)
+	err = envi.DB.SaveInstance(instanceInfo)
 	if err != nil {
 		return cloud.InstanceInfo{}, errors.Wrapf(err, "Failed to save instance '%s'", instanceName)
 	}
@@ -287,11 +287,11 @@ func deployInstance(instanceName string, cloudName string, cloudLocation string,
 }
 
 func deleteInstance(name string) error {
-	instance, err := dbp.GetInstance(name)
+	instance, err := envi.DB.GetInstance(name)
 	if err != nil {
 		return errors.Wrapf(err, "Could not retrieve instance '%s'", name)
 	}
-	cloudInfo, err := dbp.GetCloud(instance.CloudName)
+	cloudInfo, err := envi.DB.GetCloud(instance.CloudName)
 	if err != nil {
 		return errors.Wrapf(err, "Could not retrieve cloud '%s'", name)
 	}
@@ -322,15 +322,15 @@ func deleteInstance(name string) error {
 			log.Errorf("Failed to delete volume '%s': %s", vol.Name, err.Error())
 		}
 	}
-	return dbp.DeleteInstance(name)
+	return envi.DB.DeleteInstance(name)
 }
 
 func startInstance(name string) error {
-	instance, err := dbp.GetInstance(name)
+	instance, err := envi.DB.GetInstance(name)
 	if err != nil {
 		return errors.Wrapf(err, "Could not retrieve instance '%s'", name)
 	}
-	cloudInfo, err := dbp.GetCloud(instance.CloudName)
+	cloudInfo, err := envi.DB.GetCloud(instance.CloudName)
 	if err != nil {
 		return errors.Wrapf(err, "Could not retrieve cloud '%s'", name)
 	}
@@ -349,11 +349,11 @@ func startInstance(name string) error {
 }
 
 func stopInstance(name string) error {
-	instance, err := dbp.GetInstance(name)
+	instance, err := envi.DB.GetInstance(name)
 	if err != nil {
 		return errors.Wrapf(err, "Could not retrieve instance '%s'", name)
 	}
-	cloudInfo, err := dbp.GetCloud(instance.CloudName)
+	cloudInfo, err := envi.DB.GetCloud(instance.CloudName)
 	if err != nil {
 		return errors.Wrapf(err, "Could not retrieve cloud '%s'", name)
 	}
@@ -372,7 +372,7 @@ func stopInstance(name string) error {
 }
 
 func tunnelInstance(name string) error {
-	instanceInfo, err := dbp.GetInstance(name)
+	instanceInfo, err := envi.DB.GetInstance(name)
 	if err != nil {
 		return errors.Wrapf(err, "Could not retrieve instance '%s'", name)
 	}
@@ -411,7 +411,7 @@ func tunnelInstance(name string) error {
 }
 
 func keyInstance(name string) error {
-	instanceInfo, err := dbp.GetInstance(name)
+	instanceInfo, err := envi.DB.GetInstance(name)
 	if err != nil {
 		return errors.Wrapf(err, "Could not retrieve instance '%s'", name)
 	}

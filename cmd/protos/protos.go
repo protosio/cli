@@ -1,26 +1,29 @@
 package main
 
 import (
+	"fmt"
 	"os"
+	osuser "os/user"
 
 	"github.com/protosio/cli/internal/db"
+	"github.com/protosio/cli/internal/env"
+	"github.com/protosio/cli/internal/user"
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli/v2"
 )
 
 var log *logrus.Logger
-var dbp db.DB
+var envi *env.Env
 var cloudName string
 var cloudLocation string
 var protosVersion string
 
 func main() {
-	log = logrus.New()
 	var loglevel string
 	app := &cli.App{
 		Name:    "protos-cli",
 		Usage:   "Command-line client for Protos",
-		Version: "0.0.0-dev.1",
+		Version: "0.0.0-dev.2",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:        "log, l",
@@ -38,18 +41,13 @@ func main() {
 	}
 
 	app.Before = func(c *cli.Context) error {
-		level, err := logrus.ParseLevel(loglevel)
-		if err != nil {
-			return err
-		}
-		log.SetLevel(level)
-		config(c.Args().First())
+		config(c.Args().First(), loglevel)
 		return nil
 	}
 
 	app.After = func(c *cli.Context) error {
-		if dbp != nil {
-			return dbp.Close()
+		if envi != nil && envi.DB != nil {
+			return envi.DB.Close()
 		}
 		return nil
 	}
@@ -82,10 +80,28 @@ func catchSignals(sigs chan os.Signal, quit chan interface{}) {
 	quit <- true
 }
 
-func config(currentCmd string) {
-	var err error
+func config(currentCmd string, logLevel string) {
+	log = logrus.New()
+	level, err := logrus.ParseLevel(logLevel)
+	if err != nil {
+		fmt.Println(fmt.Errorf("Log level '%s' is invalid", logLevel))
+		os.Exit(1)
+	}
+	log.SetLevel(level)
+
+	usr, _ := osuser.Current()
+	protosDir := usr.HomeDir + "/.protos"
+	protosDB := "/protos.db"
+
+	dbi, err := db.Open(protosDir, protosDB)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	envi = env.New(dbi, log)
+
 	if currentCmd != "init" {
-		dbp, err = db.Open("")
+		_, err = user.Get(envi)
 		if err != nil {
 			log.Fatal(err)
 		}
