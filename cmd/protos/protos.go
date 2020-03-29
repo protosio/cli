@@ -38,6 +38,7 @@ func main() {
 			cmdRelease,
 			cmdCloud,
 			cmdInstance,
+			cmdUser,
 		},
 	}
 
