@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/protosio/cli/internal/user"
 	"github.com/urfave/cli/v2"
@@ -16,6 +17,44 @@ var cmdUser *cli.Command = &cli.Command{
 			Usage: "Prints info about the local user configured during init",
 			Action: func(c *cli.Context) error {
 				return infoUser()
+			},
+		},
+		{
+			Name:  "set",
+			Usage: "Allows you to modify details about the user (name and domain supported)",
+			Subcommands: []*cli.Command{
+				{
+					Name:  "name",
+					Usage: "Set new `NAME` for the user",
+					Action: func(c *cli.Context) error {
+						name := c.Args().Get(0)
+						if name == "" {
+							cli.ShowSubcommandHelp(c)
+							os.Exit(1)
+						}
+						usr, err := user.Get(envi)
+						if err != nil {
+							return err
+						}
+						return usr.SetName(name)
+					},
+				},
+				{
+					Name:  "domain",
+					Usage: "Set new `DOMAIN` for the user",
+					Action: func(c *cli.Context) error {
+						domain := c.Args().Get(0)
+						if domain == "" {
+							cli.ShowSubcommandHelp(c)
+							os.Exit(1)
+						}
+						usr, err := user.Get(envi)
+						if err != nil {
+							return err
+						}
+						return usr.SetDomain(domain)
+					},
+				},
 			},
 		},
 	},

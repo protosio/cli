@@ -16,21 +16,35 @@ type Info struct {
 }
 
 // Save saves the user to db
-func (ui Info) Save() {
+func (ui Info) save() {
 	err := ui.env.DB.Save(&ui)
 	if err != nil {
 		panic(err)
 	}
 }
 
+// SetName enables the changing of the name of the user
+func (ui Info) SetName(name string) error {
+	ui.Name = name
+	ui.save()
+	return nil
+}
+
+// SetDomain enables the changing of the domain of the user
+func (ui Info) SetDomain(domain string) error {
+	ui.Domain = domain
+	ui.save()
+	return nil
+}
+
 // New creates and returns a new user. Also validates the data
 func New(env *env.Env, username string, name string, domain string) (Info, error) {
 	usrInfo, err := Get(env)
 	if err == nil {
-		return usrInfo, fmt.Errorf("User '%s' already initialized", usrInfo.Username)
+		return usrInfo, fmt.Errorf("User '%s' already initialized. Modify it using the 'user set' command", usrInfo.Username)
 	}
 	user := Info{env: env, Username: username, Name: name, Domain: domain}
-	user.Save()
+	user.save()
 	return user, nil
 }
 
@@ -46,5 +60,7 @@ func Get(env *env.Env) (Info, error) {
 	} else if len(users) > 1 {
 		panic("Found more than one user, please delete DB and re-run init")
 	}
-	return users[0], nil
+	usr := users[0]
+	usr.env = env
+	return usr, nil
 }
