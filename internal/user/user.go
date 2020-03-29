@@ -42,7 +42,7 @@ func Get(env *env.Env) (Info, error) {
 		panic(err)
 	}
 	if len(users) < 1 {
-		return Info{}, errors.New("Please run init first as there is no user info")
+		return Info{}, errors.New("There is no user info")
 	} else if len(users) > 1 {
 		panic("Found more than one user, please delete DB and re-run init")
 	}

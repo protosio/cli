@@ -5,6 +5,7 @@ import (
 	"os"
 	osuser "os/user"
 
+	"github.com/pkg/errors"
 	"github.com/protosio/cli/internal/db"
 	"github.com/protosio/cli/internal/env"
 	"github.com/protosio/cli/internal/user"
@@ -103,7 +104,7 @@ func config(currentCmd string, logLevel string) {
 	if currentCmd != "init" {
 		_, err = user.Get(envi)
 		if err != nil {
-			log.Fatal(err)
+			log.Fatal(errors.Wrap(err, "Please run init command to setup Protos"))
 		}
 	}
 }
