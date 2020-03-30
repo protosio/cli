@@ -4,8 +4,24 @@ import (
 	"errors"
 	"fmt"
 
+	"cuelang.org/go/cue"
+	"cuelang.org/go/encoding/gocode/gocodec"
 	"github.com/protosio/cli/internal/env"
 )
+
+const config = `
+import "strings"
+
+UserInfo :: {
+    Username: string & strings.MaxRunes(32)
+    Name: string & strings.MinRunes(1) & strings.MaxRunes(128)
+    Domain: string & strings.MinRunes(1) & strings.MaxRunes(128)
+}
+UserInfo
+`
+
+var r cue.Runtime
+var codec = gocodec.New(&r, nil)
 
 // Info represents the local Protos user
 type Info struct {
@@ -37,6 +53,16 @@ func (ui Info) SetDomain(domain string) error {
 	return nil
 }
 
+// Validate checks if the user info conforms to the user CUE schema
+func (ui Info) Validate() error {
+	uiCueInstance, _ := r.Compile("", config)
+	return codec.Validate(uiCueInstance.Value(), &ui)
+}
+
+//
+// package methods
+//
+
 // New creates and returns a new user. Also validates the data
 func New(env *env.Env, username string, name string, domain string) (Info, error) {
 	usrInfo, err := Get(env)
@@ -44,6 +70,10 @@ func New(env *env.Env, username string, name string, domain string) (Info, error
 		return usrInfo, fmt.Errorf("User '%s' already initialized. Modify it using the 'user set' command", usrInfo.Username)
 	}
 	user := Info{env: env, Username: username, Name: name, Domain: domain}
+	err = user.Validate()
+	if err != nil {
+		return user, fmt.Errorf("Failed to add user. Validation error: %v", err)
+	}
 	user.save()
 	return user, nil
 }
@@ -60,6 +90,7 @@ func Get(env *env.Env) (Info, error) {
 	} else if len(users) > 1 {
 		panic("Found more than one user, please delete DB and re-run init")
 	}
+
 	usr := users[0]
 	usr.env = env
 	return usr, nil
