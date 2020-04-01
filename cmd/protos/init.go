@@ -63,6 +63,33 @@ func protosUserinit() error {
 		return err
 	}
 
+	password := ""
+	passwordconfirm := " "
+
+	for password != passwordconfirm {
+		passwordQuestion := []*survey.Question{{
+			Name:     "password",
+			Prompt:   &survey.Password{Message: "Password used to authenticate on the Protos instance and apps that you deploy on it.\nPASSWORD: "},
+			Validate: survey.Required,
+		}}
+		err = survey.Ask(passwordQuestion, &password)
+		if err != nil {
+			return err
+		}
+		passwordConfirmQuestion := []*survey.Question{{
+			Name:     "passwordconfirm",
+			Prompt:   &survey.Password{Message: "CONFIRM PASSWORD: "},
+			Validate: survey.Required,
+		}}
+		err = survey.Ask(passwordConfirmQuestion, &passwordconfirm)
+		if err != nil {
+			return err
+		}
+		if password != passwordconfirm {
+			envi.Log.Error("Passwords don't match")
+		}
+	}
+
 	domainQuestion := []*survey.Question{{
 		Name:     "name",
 		Prompt:   &survey.Input{Message: "Fill in a domain name that you would like to use.\nIMPORTANT NOTE: ideally you own the domain or it is available for registration. If not, the domain will only be able to be used internally.\nDOMAIN: "},
@@ -74,7 +101,7 @@ func protosUserinit() error {
 		return err
 	}
 
-	_, err = user.New(envi, username, name, domain)
+	_, err = user.New(envi, username, name, domain, password)
 	if err != nil {
 		return err
 	}

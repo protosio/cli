@@ -6,11 +6,14 @@ import (
 	"os/signal"
 	"syscall"
 	"text/tabwriter"
+	"time"
 
 	"github.com/pkg/errors"
 	"github.com/protosio/cli/internal/cloud"
 	"github.com/protosio/cli/internal/release"
 	ssh "github.com/protosio/cli/internal/ssh"
+	"github.com/protosio/cli/internal/user"
+	pclient "github.com/protosio/protos/pkg/client"
 	"github.com/urfave/cli/v2"
 )
 
@@ -281,6 +284,45 @@ func deployInstance(instanceName string, cloudName string, cloudLocation string,
 	err = envi.DB.SaveInstance(instanceInfo)
 	if err != nil {
 		return cloud.InstanceInfo{}, errors.Wrapf(err, "Failed to save instance '%s'", instanceName)
+	}
+
+	// wait for the instance to be up
+	log.Infof("Creating SSH tunnel to instance '%s'", instanceName)
+	tunnel := ssh.NewTunnel(instanceInfo.PublicIP+":22", "root", key.SSHAuth(), "localhost:8080", log)
+	tries := 0
+	var localPort int
+	for {
+		localPort, err = tunnel.Start()
+		if err != nil {
+			lerr := errors.Wrap(err, "Error while creating the SSH tunnel")
+			if tries == 20 {
+				return cloud.InstanceInfo{}, lerr
+			}
+			log.Debugf("Waiting for instance to be reachable: %v", lerr)
+			tries++
+			time.Sleep(3 * time.Second)
+			continue
+		} else {
+			break
+		}
+	}
+
+	user, err := user.Get(envi)
+	if err != nil {
+		return cloud.InstanceInfo{}, err
+	}
+
+	// do the initialization
+	protos := pclient.NewInitClient(fmt.Sprintf("locahost:%d", localPort), user.Username, user.Password, user.Domain)
+	err = protos.InitInstance()
+	if err != nil {
+		return cloud.InstanceInfo{}, errors.Wrap(err, "Error while doing the instance initialization")
+	}
+
+	// close the SSH tunnel
+	err = tunnel.Close()
+	if err != nil {
+		return cloud.InstanceInfo{}, errors.Wrap(err, "Error while terminating the SSH tunnel")
 	}
 
 	return instanceInfo, nil

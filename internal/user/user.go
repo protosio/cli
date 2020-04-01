@@ -13,9 +13,10 @@ const config = `
 import "strings"
 
 UserInfo :: {
-    Username: string & strings.MaxRunes(32)
+    Username: string & strings.MinRunes(1) & strings.MaxRunes(32)
     Name: string & strings.MinRunes(1) & strings.MaxRunes(128)
-    Domain: string & strings.MinRunes(1) & strings.MaxRunes(128)
+	Domain: string & strings.MinRunes(3) & strings.MaxRunes(128)
+	Password: string & strings.MinRunes(10) & strings.MaxRunes(128)
 }
 UserInfo
 `
@@ -29,6 +30,7 @@ type Info struct {
 	Username string `storm:"id"`
 	Name     string
 	Domain   string
+	Password string
 }
 
 // Save saves the user to db
@@ -64,12 +66,12 @@ func (ui Info) Validate() error {
 //
 
 // New creates and returns a new user. Also validates the data
-func New(env *env.Env, username string, name string, domain string) (Info, error) {
+func New(env *env.Env, username string, name string, domain string, password string) (Info, error) {
 	usrInfo, err := Get(env)
 	if err == nil {
 		return usrInfo, fmt.Errorf("User '%s' already initialized. Modify it using the 'user set' command", usrInfo.Username)
 	}
-	user := Info{env: env, Username: username, Name: name, Domain: domain}
+	user := Info{env: env, Username: username, Name: name, Domain: domain, Password: password}
 	err = user.Validate()
 	if err != nil {
 		return user, fmt.Errorf("Failed to add user. Validation error: %v", err)
