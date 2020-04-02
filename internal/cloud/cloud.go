@@ -75,7 +75,7 @@ type Provider interface {
 	// Config methods
 	AuthFields() (fields []string)                      // returns the fields that are required to authenticate for a specific cloud provider
 	SupportedLocations() (locations []string)           // returns the supported locations for a specific cloud provider
-	Init(auth map[string]string, location string) error // a cloud provider always needs to have Init called to configure it
+	Init(auth map[string]string, location string) error // a cloud provider always needs to have Init called to configure it and test the credentials. If auth fails, Init should return an error
 	GetInfo() ProviderInfo                              // returns information that can be stored in the database and allows for re-creation of the provider
 	SupportedMachines() (map[string]MachineSpec, error) // returns a map of machine ids and their hardware specifications. A user will choose the machines for their instance
 
