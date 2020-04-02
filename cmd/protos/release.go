@@ -18,15 +18,54 @@ const (
 
 var cmdRelease *cli.Command = &cli.Command{
 	Name:  "release",
-	Usage: "Lists the latest available Protos releases",
-	Action: func(c *cli.Context) error {
+	Usage: "Manage Protos releases",
+	Subcommands: []*cli.Command{
+		{
+			Name:  "ls",
+			Usage: "Lists the available Protosd releases",
+			Action: func(c *cli.Context) error {
+				releases, err := getProtosReleases()
+				if err != nil {
+					return err
+				}
+				printProtosReleases(releases)
+				return nil
+			},
+		},
+		{
+			Name:      "upload",
+			ArgsUsage: "<image path> <image name>",
+			Usage:     "Uploads a locally built image to a cloud provider. Used for development",
+			Flags: []cli.Flag{
+				&cli.StringFlag{
+					Name:        "cloud",
+					Usage:       "Specify which `CLOUD` to deploy the instance on",
+					Required:    true,
+					Destination: &cloudName,
+				},
+				&cli.StringFlag{
+					Name:        "location",
+					Usage:       "Specify one of the supported `LOCATION`s to upload the image (cloud specific). Not required for all cloud providers",
+					Required:    false,
+					Destination: &cloudLocation,
+				},
+			},
+			Action: func(c *cli.Context) error {
+				imagePath := c.Args().Get(0)
+				if imagePath == "" {
+					cli.ShowSubcommandHelp(c)
+					os.Exit(1)
+				}
 
-		releases, err := getProtosReleases()
-		if err != nil {
-			return err
-		}
-		printProtosReleases(releases)
-		return nil
+				imageName := c.Args().Get(1)
+				if imagePath == "" {
+					cli.ShowSubcommandHelp(c)
+					os.Exit(1)
+				}
+
+				return uploadLocalImageToCloud(imagePath, imageName, cloudName, cloudLocation)
+			},
+		},
 	},
 }
 
@@ -66,4 +105,47 @@ func getProtosReleases() (release.Releases, error) {
 	}
 
 	return releases, nil
+}
+
+func uploadLocalImageToCloud(imagePath string, imageName string, cloudName string, cloudLocation string) error {
+	protosImage := "protos-" + imageName
+	errMsg := fmt.Sprintf("Failed to upload local image '%s' to cloud '%s'", imagePath, cloudName)
+	// check local image file
+	finfo, err := os.Stat(imagePath)
+	if err != nil {
+		return errors.Wrapf(err, "Could not stat file '%s'", imagePath)
+	}
+	if finfo.IsDir() {
+		return fmt.Errorf("Path '%s' is a directory", imagePath)
+	}
+	if finfo.Size() == 0 {
+		return fmt.Errorf("Image '%s' has 0 bytes", imagePath)
+	}
+
+	// init cloud
+	provider, err := dbp.GetCloud(cloudName)
+	if err != nil {
+		return errors.Wrapf(err, "Could not retrieve cloud '%s'", cloudName)
+	}
+	client := provider.Client()
+	err = client.Init(provider.Auth, cloudLocation)
+	if err != nil {
+		return errors.Wrapf(err, "Failed to connect to cloud provider '%s'(%s) API", cloudName, provider.Type.String())
+	}
+
+	// upload image
+	images, err := client.GetImages()
+	if err != nil {
+		return errors.Wrap(err, errMsg)
+	}
+	if _, found := images[protosImage]; found == true {
+		return errors.Wrap(fmt.Errorf("Found an image with name '%s'", imageName), errMsg)
+	}
+
+	_, err = client.UploadLocalImage(imagePath, protosImage)
+	if err != nil {
+		return errors.Wrap(err, errMsg)
+	}
+
+	return nil
 }

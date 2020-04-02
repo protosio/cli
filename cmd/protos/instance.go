@@ -203,7 +203,7 @@ func deployInstance(instanceName string, cloudName string, cloudLocation string,
 	imageID := ""
 	images, err := client.GetImages()
 	if err != nil {
-		return cloud.InstanceInfo{}, errors.Wrap(err, "Failed to initialize Protos")
+		return cloud.InstanceInfo{}, errors.Wrap(err, "Failed to deploy Protos instance")
 	}
 	if id, found := images[protosImage]; found == true {
 		log.Infof("Found Protos image version '%s' in your cloud account", release.Version)
@@ -214,7 +214,7 @@ func deployInstance(instanceName string, cloudName string, cloudLocation string,
 			log.Infof("Protos image version '%s' not in your infra cloud account. Adding it.", release.Version)
 			imageID, err = client.AddImage(image.URL, image.Digest, release.Version)
 			if err != nil {
-				return cloud.InstanceInfo{}, errors.Wrap(err, "Failed to initialize Protos")
+				return cloud.InstanceInfo{}, errors.Wrap(err, "Failed to deploy Protos instance")
 			}
 		} else {
 			return cloud.InstanceInfo{}, errors.Errorf("Could not find a Protos version '%s' release for cloud '%s'", release.Version, string(provider.Type))
@@ -225,7 +225,7 @@ func deployInstance(instanceName string, cloudName string, cloudLocation string,
 	log.Info("Generating SSH key for the new VM instance")
 	key, err := ssh.GenerateKey()
 	if err != nil {
-		return cloud.InstanceInfo{}, errors.Wrap(err, "Failed to initialize Protos")
+		return cloud.InstanceInfo{}, errors.Wrap(err, "Failed to deploy Protos instance")
 	}
 
 	// deploy a protos instance

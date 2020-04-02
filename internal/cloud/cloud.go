@@ -6,6 +6,7 @@ import (
 	"github.com/pkg/errors"
 )
 
+// Type represents a specific cloud (AWS, GCP, DigitalOcean etc.)
 type Type string
 
 func (ct Type) String() string {
@@ -88,6 +89,7 @@ type Provider interface {
 	// Image methods
 	GetImages() (images map[string]string, err error)
 	AddImage(url string, hash string, version string) (id string, err error)
+	UploadLocalImage(imagePath string, imageName string) (id string, err error)
 	RemoveImage(name string) error
 	// Volume methods
 	// - size should by provided in megabytes

@@ -1,9 +1,14 @@
 package cloud
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
+	"os"
 	"strings"
 
+	scp "github.com/bramvdbogaerde/go-scp"
 	"github.com/pkg/errors"
 	"github.com/protosio/cli/internal/ssh"
 	account "github.com/scaleway/scaleway-sdk-go/api/account/v2alpha1"
@@ -11,6 +16,7 @@ import (
 	"github.com/scaleway/scaleway-sdk-go/api/marketplace/v1"
 	"github.com/scaleway/scaleway-sdk-go/scw"
 	log "github.com/sirupsen/logrus"
+	gssh "golang.org/x/crypto/ssh"
 )
 
 const (
@@ -332,9 +338,6 @@ func (sw *scaleway) AddImage(url string, hash string, version string) (string, e
 	}
 	log.Info("SSH connection initiated")
 
-	//
-	// wite Protos image to volume
-	//
 	localISO := "/tmp/protos-scaleway.iso"
 
 	log.Info("Downloading Protos image")
@@ -351,6 +354,10 @@ func (sw *scaleway) AddImage(url string, hash string, version string) (string, e
 		log.Errorf("Image integrity check failed: %s: %s", out, err.Error())
 		return "", errors.Wrap(err, "Failed to add Protos image to Scaleway. Error downloading Protos VM image. Integrity check failed")
 	}
+
+	//
+	// wite Protos image to volume
+	//
 
 	out, err = ssh.ExecuteCommand("ls /dev/vdb", sshClient)
 	if err != nil {
@@ -410,6 +417,173 @@ func (sw *scaleway) AddImage(url string, hash string, version string) (string, e
 		return "", errors.Wrap(err, "Failed to add Protos image to Scaleway. Error while creating image from snapshot")
 	}
 	log.Infof("Protos image '%s' created", imageResp.Image.ID)
+
+	log.Infof("Deleting protos image volume '%s'", vol.ID)
+	err = sw.instanceAPI.DeleteVolume(&instance.DeleteVolumeRequest{Zone: sw.location, VolumeID: vol.ID})
+	if err != nil {
+		return "", errors.Wrap(err, "Error while removing protos image volume. Manual clean might be needed")
+	}
+
+	return imageResp.Image.ID, nil
+}
+
+func (sw *scaleway) UploadLocalImage(imagePath string, imageName string) (id string, err error) {
+
+	errMsg := "Failed to upload Protos image to Scaleway"
+	protosImage := "protos-" + imageName
+
+	f, err := os.Open(imagePath)
+	if err != nil {
+		return "", errors.Wrap(err, errMsg)
+	}
+	defer f.Close()
+
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", errors.Wrap(err, errMsg)
+	}
+
+	imageHash := hex.EncodeToString(h.Sum(nil))
+
+	//
+	// Create and add a temporary ssh key to account
+	//
+
+	key, err := ssh.GenerateKey()
+	if err != nil {
+		return "", errors.Wrap(err, errMsg)
+	}
+	pubKey := strings.TrimSuffix(key.Public(), "\n") + " root@protos.io"
+
+	sshKey, err := sw.accountAPI.CreateSSHKey(&account.CreateSSHKeyRequest{Name: uploadSSHkey, OrganizationID: sw.credentials.organisationID, PublicKey: pubKey})
+	if err != nil {
+		return "", errors.Wrap(err, errMsg+". Failed to add temporary SSH key")
+	}
+	defer sw.cleanImageSSHkeys(sshKey.ID)
+
+	//
+	// Create upload server
+	//
+
+	imageID, err := sw.getUploadImageID(sw.location)
+	if err != nil {
+		return "", errors.Wrap(err, errMsg)
+	}
+	log.Infof("Using image '%s' for adding Protos image to Scaleway", imageID)
+
+	srv, vol, err := sw.createImageUploadVM(imageID)
+	if err != nil {
+		return "", errors.Wrap(err, errMsg)
+	}
+	defer sw.cleanImageUploadVM(srv)
+
+	//
+	// Upload image via SCP
+	//
+
+	sshConfig := &gssh.ClientConfig{
+		User: "root",
+		Auth: []gssh.AuthMethod{
+			key.SSHAuth(),
+		},
+		HostKeyCallback: gssh.InsecureIgnoreHostKey(),
+	}
+
+	client := scp.NewClient(srv.PublicIP.Address.String(), sshConfig)
+	err = client.Connect()
+	if err != nil {
+		return "", errors.Wrap(err, errMsg)
+	}
+	defer client.Close()
+
+	remoteImage := "/tmp/" + protosImage
+	err = client.CopyFile(f, remoteImage, "0655")
+	if err != nil {
+		return "", errors.Wrap(err, errMsg)
+	}
+
+	//
+	// connect via SSH and check the integrity of the image
+	//
+
+	log.Info("Trying to connect to Scaleway upload instance over SSH")
+
+	sshClient, err := ssh.NewConnection(srv.PublicIP.Address.String(), "root", key.SSHAuth(), 10)
+	if err != nil {
+		return "", errors.Wrap(err, errMsg+". Failed to deploy VM to Scaleway")
+	}
+	log.Info("SSH connection initiated")
+
+	log.Info("Checking image integrity")
+	cmdString := fmt.Sprintf("openssl dgst -r -sha256 %s | awk '{ print $1 }' | { read digest; if [ \"$digest\" = \"%s\" ]; then true; else false; fi }", remoteImage, imageHash)
+	out, err := ssh.ExecuteCommand(cmdString, sshClient)
+	if err != nil {
+		log.Errorf("Image integrity check failed: %s: %s", out, err.Error())
+		return "", errors.Wrap(err, errMsg+". Integrity check failed")
+	}
+
+	//
+	// wite Protos image to volume
+	//
+
+	out, err = ssh.ExecuteCommand("ls /dev/vdb", sshClient)
+	if err != nil {
+		log.Errorf("Snapshot volume not found: %s", out)
+		return "", errors.Wrap(err, errMsg+". Snapshot volume not found")
+	}
+
+	log.Info("Writing Protos image to volume")
+	out, err = ssh.ExecuteCommand("dd if="+remoteImage+" of=/dev/vdb", sshClient)
+	if err != nil {
+		log.Errorf("Error while writing image to volume: %s", out)
+		return "", errors.Wrap(err, errMsg+". Error while writing image to volume")
+	}
+
+	//
+	// turn off upload VM and dettach volume
+	//
+
+	log.Infof("Stopping upload server '%s' (%s)", srv.Name, srv.ID)
+	stopReq := &instance.ServerActionAndWaitRequest{
+		ServerID: srv.ID,
+		Zone:     sw.location,
+		Action:   instance.ServerActionPoweroff,
+	}
+	err = sw.instanceAPI.ServerActionAndWait(stopReq)
+	if err != nil {
+		return "", errors.Wrap(err, errMsg+". Error while stopping upload server")
+	}
+
+	_, err = sw.instanceAPI.DetachVolume(&instance.DetachVolumeRequest{Zone: sw.location, VolumeID: vol.ID})
+	if err != nil {
+		return "", errors.Wrap(err, errMsg+". Error while detaching image volume")
+	}
+
+	//
+	// create snapshot and image
+	//
+
+	log.Info("Creating snapshot from volume")
+	snapshotResp, err := sw.instanceAPI.CreateSnapshot(&instance.CreateSnapshotRequest{
+		VolumeID: vol.ID,
+		Name:     protosImage + "-snapshot",
+		Zone:     sw.location,
+	})
+	if err != nil {
+		return "", errors.Wrap(err, errMsg+". Error while creating snapshot from volume")
+	}
+
+	log.Info("Creating image from snapshot")
+	imageResp, err := sw.instanceAPI.CreateImage(&instance.CreateImageRequest{
+		Name:       protosImage,
+		Arch:       instance.ArchX86_64,
+		RootVolume: snapshotResp.Snapshot.ID,
+		Zone:       sw.location,
+	})
+	if err != nil {
+		return "", errors.Wrap(err, errMsg+". Error while creating image from snapshot")
+	}
+	log.Infof("Protos image '%s(%s)' created", protosImage, imageResp.Image.ID)
 
 	log.Infof("Deleting protos image volume '%s'", vol.ID)
 	err = sw.instanceAPI.DeleteVolume(&instance.DeleteVolumeRequest{Zone: sw.location, VolumeID: vol.ID})
