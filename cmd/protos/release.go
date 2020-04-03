@@ -39,7 +39,7 @@ var cmdRelease *cli.Command = &cli.Command{
 			Flags: []cli.Flag{
 				&cli.StringFlag{
 					Name:        "cloud",
-					Usage:       "Specify which `CLOUD` to deploy the instance on",
+					Usage:       "Specify which `CLOUD` provider to upload the image to",
 					Required:    true,
 					Destination: &cloudName,
 				},
