@@ -1,7 +1,10 @@
 package cloud
 
 import (
+	"fmt"
 	"log"
+	"net"
+	"time"
 
 	"github.com/pkg/errors"
 )
@@ -125,4 +128,23 @@ func findInSlice(slice []string, value string) (int, bool) {
 		}
 	}
 	return -1, false
+}
+
+func waitForPort(host string, port string, maxTries int) error {
+	tries := 0
+	for {
+		timeout := time.Second
+		conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, port), timeout)
+		if err != nil {
+			time.Sleep(3 * time.Second)
+			tries++
+			if tries == maxTries {
+				return fmt.Errorf("Failed to connect to '%s:%s' after %d tries", host, port, maxTries)
+			}
+		}
+		if conn != nil {
+			conn.Close()
+			return nil
+		}
+	}
 }
