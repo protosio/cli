@@ -108,7 +108,6 @@ func getProtosReleases() (release.Releases, error) {
 }
 
 func uploadLocalImageToCloud(imagePath string, imageName string, cloudName string, cloudLocation string) error {
-	protosImage := "protos-" + imageName
 	errMsg := fmt.Sprintf("Failed to upload local image '%s' to cloud '%s'", imagePath, cloudName)
 	// check local image file
 	finfo, err := os.Stat(imagePath)
@@ -138,11 +137,11 @@ func uploadLocalImageToCloud(imagePath string, imageName string, cloudName strin
 	if err != nil {
 		return errors.Wrap(err, errMsg)
 	}
-	if _, found := images[protosImage]; found == true {
+	if _, found := images[imageName]; found == true {
 		return errors.Wrap(fmt.Errorf("Found an image with name '%s'", imageName), errMsg)
 	}
 
-	_, err = client.UploadLocalImage(imagePath, protosImage)
+	_, err = client.UploadLocalImage(imagePath, imageName)
 	if err != nil {
 		return errors.Wrap(err, errMsg)
 	}

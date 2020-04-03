@@ -282,7 +282,8 @@ func (sw *scaleway) GetImages() (map[string]string, error) {
 		return images, errors.Wrap(err, "Failed to retrieve account images from Scaleway")
 	}
 	for _, img := range resp.Images {
-		images[img.Name] = img.ID
+		imgName := strings.TrimPrefix(img.Name, "protos-")
+		images[imgName] = img.ID
 	}
 	return images, nil
 }

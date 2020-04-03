@@ -177,7 +177,6 @@ func listInstances() error {
 }
 
 func deployInstance(instanceName string, cloudName string, cloudLocation string, release release.Release, machineType string) (cloud.InstanceInfo, error) {
-	protosImage := "protos-" + release.Version
 
 	// init cloud
 	provider, err := dbp.GetCloud(cloudName)
@@ -205,7 +204,7 @@ func deployInstance(instanceName string, cloudName string, cloudLocation string,
 	if err != nil {
 		return cloud.InstanceInfo{}, errors.Wrap(err, "Failed to deploy Protos instance")
 	}
-	if id, found := images[protosImage]; found == true {
+	if id, found := images[release.Version]; found == true {
 		log.Infof("Found Protos image version '%s' in your cloud account", release.Version)
 		imageID = id
 	} else {
