@@ -331,6 +331,12 @@ func (sw *scaleway) AddImage(url string, hash string, version string) (string, e
 	// connect via SSH, download Protos image and write it to a volume
 	//
 
+	log.Infof("Waiting for SSH service to be reachable at '%s'", srv.PublicIP.Address.String()+":22")
+	err = waitForPort(srv.PublicIP.Address.String(), "22", 25)
+	if err != nil {
+		return "", errors.Wrap(err, "Failed to add Protos image to Scaleway")
+	}
+
 	log.Info("Trying to connect to Scaleway upload instance over SSH")
 
 	sshClient, err := ssh.NewConnection(srv.PublicIP.Address.String(), "root", key.SSHAuth(), 10)
@@ -433,14 +439,14 @@ func (sw *scaleway) UploadLocalImage(imagePath string, imageName string) (id str
 	errMsg := "Failed to upload Protos image to Scaleway"
 	protosImage := "protos-" + imageName
 
-	f, err := os.Open(imagePath)
+	fdHash, err := os.Open(imagePath)
 	if err != nil {
 		return "", errors.Wrap(err, errMsg)
 	}
-	defer f.Close()
+	defer fdHash.Close()
 
 	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
+	if _, err := io.Copy(h, fdHash); err != nil {
 		return "", errors.Wrap(err, errMsg)
 	}
 
@@ -482,6 +488,12 @@ func (sw *scaleway) UploadLocalImage(imagePath string, imageName string) (id str
 	// Upload image via SCP
 	//
 
+	log.Infof("Waiting for SSH service to be reachable at '%s'", srv.PublicIP.Address.String()+":22")
+	err = waitForPort(srv.PublicIP.Address.String(), "22", 25)
+	if err != nil {
+		return "", errors.Wrap(err, errMsg)
+	}
+
 	sshConfig := &gssh.ClientConfig{
 		User: "root",
 		Auth: []gssh.AuthMethod{
@@ -490,15 +502,23 @@ func (sw *scaleway) UploadLocalImage(imagePath string, imageName string) (id str
 		HostKeyCallback: gssh.InsecureIgnoreHostKey(),
 	}
 
-	client := scp.NewClient(srv.PublicIP.Address.String(), sshConfig)
+	client := scp.NewClient(srv.PublicIP.Address.String()+":22", sshConfig)
+	log.Infof("Connecting via SSH and starting SCP transfer to '%s'", srv.PublicIP.Address.String()+":22")
 	err = client.Connect()
 	if err != nil {
 		return "", errors.Wrap(err, errMsg)
 	}
 	defer client.Close()
 
+	fdUpload, err := os.Open(imagePath)
+	if err != nil {
+		return "", errors.Wrap(err, errMsg)
+	}
+	defer fdUpload.Close()
+
+	log.Info("Uploading image. This can take a while...")
 	remoteImage := "/tmp/" + protosImage
-	err = client.CopyFile(f, remoteImage, "0655")
+	err = client.CopyFile(fdUpload, remoteImage, "0655")
 	if err != nil {
 		return "", errors.Wrap(err, errMsg)
 	}
