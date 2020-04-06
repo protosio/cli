@@ -116,8 +116,7 @@ func addCloudProvider(cloudName string) (cloud.Provider, error) {
 	}
 
 	// init cloud client
-	supportedLocations := client.SupportedLocations()
-	err = client.Init(transformCredentials(cloudCredentials), supportedLocations[0])
+	err = client.Init(transformCredentials(cloudCredentials))
 	if err != nil {
 		return nil, err
 	}
@@ -143,11 +142,11 @@ func infoCloudProvider(name string) error {
 	}
 	client := cloud.Client()
 	locations := client.SupportedLocations()
-	err = client.Init(cloud.Auth, locations[0])
+	err = client.Init(cloud.Auth)
 	if err != nil {
 		log.Error(errors.Wrapf(err, "Error reaching cloud provider '%s'(%s) API", name, cloud.Type.String()))
 	}
-	machineTypes, err := client.SupportedMachines()
+	machineTypes, err := client.SupportedMachines(locations[0])
 	if err != nil {
 		log.Error(errors.Wrapf(err, "Error reaching cloud provider '%s'(%s) API", name, cloud.Type.String()))
 	}

@@ -63,7 +63,7 @@ var cmdInstance *cli.Command = &cli.Command{
 					cli.ShowSubcommandHelp(c)
 					os.Exit(1)
 				}
-				releases, err := getProtosReleases()
+				releases, err := getProtosAvailableReleases()
 				if err != nil {
 					return err
 				}
@@ -184,13 +184,13 @@ func deployInstance(instanceName string, cloudName string, cloudLocation string,
 		return cloud.InstanceInfo{}, errors.Wrapf(err, "Could not retrieve cloud '%s'", cloudName)
 	}
 	client := provider.Client()
-	err = client.Init(provider.Auth, cloudLocation)
+	err = client.Init(provider.Auth)
 	if err != nil {
 		return cloud.InstanceInfo{}, errors.Wrapf(err, "Failed to connect to cloud provider '%s'(%s) API", cloudName, provider.Type.String())
 	}
 
 	// validate machine type
-	supportedMachineTypes, err := client.SupportedMachines()
+	supportedMachineTypes, err := client.SupportedMachines(cloudLocation)
 	if err != nil {
 		return cloud.InstanceInfo{}, err
 	}
@@ -204,14 +204,19 @@ func deployInstance(instanceName string, cloudName string, cloudLocation string,
 	if err != nil {
 		return cloud.InstanceInfo{}, errors.Wrap(err, "Failed to deploy Protos instance")
 	}
-	if id, found := images[release.Version]; found == true {
+	for id, img := range images {
+		if img.Location == cloudLocation && img.Name == release.Version {
+			imageID = id
+			break
+		}
+	}
+	if imageID != "" {
 		log.Infof("Found Protos image version '%s' in your cloud account", release.Version)
-		imageID = id
 	} else {
 		// upload protos image
 		if image, found := release.CloudImages[string(provider.Type)]; found {
 			log.Infof("Protos image version '%s' not in your infra cloud account. Adding it.", release.Version)
-			imageID, err = client.AddImage(image.URL, image.Digest, release.Version)
+			imageID, err = client.AddImage(image.URL, image.Digest, release.Version, cloudLocation)
 			if err != nil {
 				return cloud.InstanceInfo{}, errors.Wrap(err, "Failed to deploy Protos instance")
 			}
@@ -229,14 +234,14 @@ func deployInstance(instanceName string, cloudName string, cloudLocation string,
 
 	// deploy a protos instance
 	log.Infof("Deploying instance '%s' of type '%s', using Protos version '%s' (image id '%s')", instanceName, machineType, release.Version, imageID)
-	vmID, err := client.NewInstance(instanceName, imageID, key.Public(), machineType)
+	vmID, err := client.NewInstance(instanceName, imageID, key.Public(), machineType, cloudLocation)
 	if err != nil {
 		return cloud.InstanceInfo{}, errors.Wrap(err, "Failed to deploy Protos instance")
 	}
 	log.Infof("Instance with ID '%s' deployed", vmID)
 
 	// get instance info
-	instanceInfo, err := client.GetInstanceInfo(vmID)
+	instanceInfo, err := client.GetInstanceInfo(vmID, cloudLocation)
 	if err != nil {
 		return cloud.InstanceInfo{}, errors.Wrap(err, "Failed to get Protos instance info")
 	}
@@ -248,26 +253,26 @@ func deployInstance(instanceName string, cloudName string, cloudLocation string,
 
 	// create protos data volume
 	log.Infof("Creating data volume for Protos instance '%s'", instanceName)
-	volumeID, err := client.NewVolume(instanceName, 30000)
+	volumeID, err := client.NewVolume(instanceName, 30000, cloudLocation)
 	if err != nil {
 		return cloud.InstanceInfo{}, errors.Wrap(err, "Failed to create data volume")
 	}
 
 	// attach volume to instance
-	err = client.AttachVolume(volumeID, vmID)
+	err = client.AttachVolume(volumeID, vmID, cloudLocation)
 	if err != nil {
 		return cloud.InstanceInfo{}, errors.Wrapf(err, "Failed to attach volume to instance '%s'", instanceName)
 	}
 
 	// start protos instance
 	log.Infof("Starting Protos instance '%s'", instanceName)
-	err = client.StartInstance(vmID)
+	err = client.StartInstance(vmID, cloudLocation)
 	if err != nil {
 		return cloud.InstanceInfo{}, errors.Wrap(err, "Failed to start Protos instance")
 	}
 
 	// get instance info again
-	instanceInfo, err = client.GetInstanceInfo(vmID)
+	instanceInfo, err = client.GetInstanceInfo(vmID, cloudLocation)
 	if err != nil {
 		return cloud.InstanceInfo{}, errors.Wrap(err, "Failed to get Protos instance info")
 	}
@@ -291,28 +296,28 @@ func deleteInstance(name string) error {
 		return errors.Wrapf(err, "Could not retrieve cloud '%s'", name)
 	}
 	client := cloudInfo.Client()
-	err = client.Init(cloudInfo.Auth, instance.Location)
+	err = client.Init(cloudInfo.Auth)
 	if err != nil {
 		return errors.Wrapf(err, "Could not init cloud '%s'", name)
 	}
 
 	log.Infof("Stopping instance '%s' (%s)", instance.Name, instance.VMID)
-	err = client.StopInstance(instance.VMID)
+	err = client.StopInstance(instance.VMID, cloudLocation)
 	if err != nil {
 		return errors.Wrapf(err, "Could not stop instance '%s'", name)
 	}
-	vmInfo, err := client.GetInstanceInfo(instance.VMID)
+	vmInfo, err := client.GetInstanceInfo(instance.VMID, cloudLocation)
 	if err != nil {
 		return errors.Wrapf(err, "Failed to get details for instance '%s'", name)
 	}
 	log.Infof("Deleting instance '%s' (%s)", instance.Name, instance.VMID)
-	err = client.DeleteInstance(instance.VMID)
+	err = client.DeleteInstance(instance.VMID, cloudLocation)
 	if err != nil {
 		return errors.Wrapf(err, "Could not delete instance '%s'", name)
 	}
 	for _, vol := range vmInfo.Volumes {
 		log.Infof("Deleting volume '%s' (%s) for instance '%s'", vol.Name, vol.VolumeID, name)
-		err = client.DeleteVolume(vol.VolumeID)
+		err = client.DeleteVolume(vol.VolumeID, cloudLocation)
 		if err != nil {
 			log.Errorf("Failed to delete volume '%s': %s", vol.Name, err.Error())
 		}
@@ -330,13 +335,13 @@ func startInstance(name string) error {
 		return errors.Wrapf(err, "Could not retrieve cloud '%s'", name)
 	}
 	client := cloudInfo.Client()
-	err = client.Init(cloudInfo.Auth, instance.Location)
+	err = client.Init(cloudInfo.Auth)
 	if err != nil {
 		return errors.Wrapf(err, "Could not init cloud '%s'", name)
 	}
 
 	log.Infof("Starting instance '%s' (%s)", instance.Name, instance.VMID)
-	err = client.StartInstance(instance.VMID)
+	err = client.StartInstance(instance.VMID, cloudLocation)
 	if err != nil {
 		return errors.Wrapf(err, "Could not start instance '%s'", name)
 	}
@@ -353,13 +358,13 @@ func stopInstance(name string) error {
 		return errors.Wrapf(err, "Could not retrieve cloud '%s'", name)
 	}
 	client := cloudInfo.Client()
-	err = client.Init(cloudInfo.Auth, instance.Location)
+	err = client.Init(cloudInfo.Auth)
 	if err != nil {
 		return errors.Wrapf(err, "Could not init cloud '%s'", name)
 	}
 
 	log.Infof("Stopping instance '%s' (%s)", instance.Name, instance.VMID)
-	err = client.StopInstance(instance.VMID)
+	err = client.StopInstance(instance.VMID, cloudLocation)
 	if err != nil {
 		return errors.Wrapf(err, "Could not stop instance '%s'", name)
 	}

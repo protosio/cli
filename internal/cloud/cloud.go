@@ -74,32 +74,40 @@ type MachineSpec struct {
 	PriceMonthly         float32 // no currency conversion at the moment. Each cloud reports this differently
 }
 
+// ImageInfo holds information about a cloud image used for deploying an instance
+type ImageInfo struct {
+	ID       string
+	Name     string
+	Location string
+}
+
 // Provider allows interactions with cloud instances and images
 type Provider interface {
 	// Config methods
-	AuthFields() (fields []string)                      // returns the fields that are required to authenticate for a specific cloud provider
-	SupportedLocations() (locations []string)           // returns the supported locations for a specific cloud provider
-	Init(auth map[string]string, location string) error // a cloud provider always needs to have Init called to configure it and test the credentials. If auth fails, Init should return an error
-	GetInfo() ProviderInfo                              // returns information that can be stored in the database and allows for re-creation of the provider
-	SupportedMachines() (map[string]MachineSpec, error) // returns a map of machine ids and their hardware specifications. A user will choose the machines for their instance
+	AuthFields() (fields []string)                                     // returns the fields that are required to authenticate for a specific cloud provider
+	SupportedLocations() (locations []string)                          // returns the supported locations for a specific cloud provider
+	Init(auth map[string]string) error                                 // a cloud provider always needs to have Init called to configure it and test the credentials. If auth fails, Init should return an error
+	GetInfo() ProviderInfo                                             // returns information that can be stored in the database and allows for re-creation of the provider
+	SupportedMachines(location string) (map[string]MachineSpec, error) // returns a map of machine ids and their hardware specifications. A user will choose the machines for their instance
 
 	// Instance methods
-	NewInstance(name string, image string, pubKey string, machineType string) (id string, err error)
-	DeleteInstance(id string) error
-	StartInstance(id string) error
-	StopInstance(id string) error
-	GetInstanceInfo(id string) (InstanceInfo, error)
+	NewInstance(name string, image string, pubKey string, machineType string, location string) (id string, err error)
+	DeleteInstance(id string, location string) error
+	StartInstance(id string, location string) error
+	StopInstance(id string, location string) error
+	GetInstanceInfo(id string, location string) (InstanceInfo, error)
 	// Image methods
-	GetImages() (images map[string]string, err error)
-	AddImage(url string, hash string, version string) (id string, err error)
-	UploadLocalImage(imagePath string, imageName string) (id string, err error)
-	RemoveImage(name string) error
+	GetImages() (images map[string]ImageInfo, err error)
+	GetProtosImages() (images map[string]ImageInfo, err error)
+	AddImage(url string, hash string, version string, location string) (id string, err error)
+	UploadLocalImage(imagePath string, imageName string, location string) (id string, err error)
+	RemoveImage(name string, location string) error
 	// Volume methods
 	// - size should by provided in megabytes
-	NewVolume(name string, size int) (id string, err error)
-	DeleteVolume(id string) error
-	AttachVolume(volumeID string, instanceID string) error
-	DettachVolume(volumeID string, instanceID string) error
+	NewVolume(name string, size int, location string) (id string, err error)
+	DeleteVolume(id string, location string) error
+	AttachVolume(volumeID string, instanceID string, location string) error
+	DettachVolume(volumeID string, instanceID string, location string) error
 }
 
 // NewProvider creates a new cloud provider client

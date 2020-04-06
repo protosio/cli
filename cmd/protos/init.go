@@ -94,7 +94,7 @@ func protosFullInit() error {
 	err = survey.Ask(vmNameQuestion, &vmName)
 
 	// get latest Protos release
-	releases, err := getProtosReleases()
+	releases, err := getProtosAvailableReleases()
 	if err != nil {
 		return errors.Wrap(err, "Failed to initialize Protos")
 	}
@@ -105,7 +105,7 @@ func protosFullInit() error {
 
 	// select one of the supported locations by this particular cloud
 	var machineType string
-	supportedMachineTypes, err := cloudProvider.SupportedMachines()
+	supportedMachineTypes, err := cloudProvider.SupportedMachines(cloudLocation)
 	if err != nil {
 		return errors.Wrap(err, "Failed to initialize Protos")
 	}
