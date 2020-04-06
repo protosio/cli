@@ -4,12 +4,12 @@ go 1.14
 
 require (
 	github.com/AlecAivazis/survey/v2 v2.0.7
-	github.com/DataDog/zstd v1.4.4 // indirect
+	github.com/DataDog/zstd v1.4.5 // indirect
 	github.com/Masterminds/semver v1.5.0
-	github.com/Sereal/Sereal v0.0.0-20191211210414-3a6c62eca003 // indirect
+	github.com/Sereal/Sereal v0.0.0-20200326150110-2c0ed69a855f // indirect
 	github.com/asdine/storm v2.1.2+incompatible
 	github.com/bramvdbogaerde/go-scp v0.0.0-20200119201711-987556b8bdd7
-	github.com/golang/protobuf v1.3.2 // indirect
+	github.com/golang/protobuf v1.3.5 // indirect
 	github.com/golang/snappy v0.0.1 // indirect
 	github.com/konsorten/go-windows-terminal-sequences v1.0.2 // indirect
 	github.com/kr/pretty v0.1.0 // indirect

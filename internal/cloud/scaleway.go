@@ -641,7 +641,7 @@ func (sw *scaleway) RemoveImage(name string, location string) error {
 		return errors.Wrap(fmt.Errorf("location is required for Scaleway"), errMsg)
 	}
 	// find image
-	images, err := sw.GetImages()
+	images, err := sw.GetProtosImages()
 	if err != nil {
 		return errors.Wrap(err, errMsg)
 	}
@@ -655,10 +655,21 @@ func (sw *scaleway) RemoveImage(name string, location string) error {
 	if id == "" {
 		return errors.Wrap(fmt.Errorf("Could not find image '%s'", name), errMsg)
 	}
+	img, err := sw.instanceAPI.GetImage(&instance.GetImageRequest{ImageID: id, Zone: scw.Zone(location)})
+	if err != nil {
+		return errors.Wrap(err, errMsg)
+	}
+
 	err = sw.instanceAPI.DeleteImage(&instance.DeleteImageRequest{ImageID: id, Zone: scw.Zone(location)})
 	if err != nil {
 		return errors.Wrap(err, errMsg)
 	}
+
+	err = sw.instanceAPI.DeleteSnapshot(&instance.DeleteSnapshotRequest{SnapshotID: img.Image.RootVolume.ID, Zone: scw.Zone(location)})
+	if err != nil {
+		return errors.Wrap(err, errMsg)
+	}
+
 	return nil
 }
 
