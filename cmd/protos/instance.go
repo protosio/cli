@@ -18,6 +18,7 @@ import (
 )
 
 var machineType string
+var devImg string
 
 var cmdInstance *cli.Command = &cli.Command{
 	Name:  "instance",
@@ -54,6 +55,12 @@ var cmdInstance *cli.Command = &cli.Command{
 					Destination: &protosVersion,
 				},
 				&cli.StringFlag{
+					Name:        "devimg",
+					Usage:       "Use a dev image uploaded to your cloud accoun",
+					Required:    false,
+					Destination: &devImg,
+				},
+				&cli.StringFlag{
 					Name:        "type",
 					Usage:       "Specify cloud machine type `TYPE` to deploy. Get it from 'cloud info' subcommand",
 					Required:    true,
@@ -70,20 +77,22 @@ var cmdInstance *cli.Command = &cli.Command{
 				if err != nil {
 					return err
 				}
-				var release release.Release
-				if protosVersion == "" {
-					release, err = releases.GetLatest()
+				rls := release.Release{}
+				if devImg != "" {
+					rls.Version = devImg
+				} else if protosVersion != "" {
+					rls, err = releases.GetVersion(protosVersion)
 					if err != nil {
 						return err
 					}
 				} else {
-					release, err = releases.GetVersion(protosVersion)
+					rls, err = releases.GetLatest()
 					if err != nil {
 						return err
 					}
 				}
 
-				_, err = deployInstance(name, cloudName, cloudLocation, release, machineType)
+				_, err = deployInstance(name, cloudName, cloudLocation, rls, machineType)
 				return err
 			},
 		},
@@ -313,7 +322,7 @@ func deployInstance(instanceName string, cloudName string, cloudLocation string,
 	}
 
 	// do the initialization
-	protos := pclient.NewInitClient(fmt.Sprintf("locahost:%d", localPort), user.Username, user.Password, user.Domain)
+	protos := pclient.NewInitClient(fmt.Sprintf("127.0.0.1:%d", localPort), user.Username, user.Password, user.Domain)
 	err = protos.InitInstance()
 	if err != nil {
 		return cloud.InstanceInfo{}, errors.Wrap(err, "Error while doing the instance initialization")
@@ -344,22 +353,22 @@ func deleteInstance(name string) error {
 	}
 
 	log.Infof("Stopping instance '%s' (%s)", instance.Name, instance.VMID)
-	err = client.StopInstance(instance.VMID, cloudLocation)
+	err = client.StopInstance(instance.VMID, instance.Location)
 	if err != nil {
 		return errors.Wrapf(err, "Could not stop instance '%s'", name)
 	}
-	vmInfo, err := client.GetInstanceInfo(instance.VMID, cloudLocation)
+	vmInfo, err := client.GetInstanceInfo(instance.VMID, instance.Location)
 	if err != nil {
 		return errors.Wrapf(err, "Failed to get details for instance '%s'", name)
 	}
 	log.Infof("Deleting instance '%s' (%s)", instance.Name, instance.VMID)
-	err = client.DeleteInstance(instance.VMID, cloudLocation)
+	err = client.DeleteInstance(instance.VMID, instance.Location)
 	if err != nil {
 		return errors.Wrapf(err, "Could not delete instance '%s'", name)
 	}
 	for _, vol := range vmInfo.Volumes {
 		log.Infof("Deleting volume '%s' (%s) for instance '%s'", vol.Name, vol.VolumeID, name)
-		err = client.DeleteVolume(vol.VolumeID, cloudLocation)
+		err = client.DeleteVolume(vol.VolumeID, instance.Location)
 		if err != nil {
 			log.Errorf("Failed to delete volume '%s': %s", vol.Name, err.Error())
 		}
@@ -383,7 +392,7 @@ func startInstance(name string) error {
 	}
 
 	log.Infof("Starting instance '%s' (%s)", instance.Name, instance.VMID)
-	err = client.StartInstance(instance.VMID, cloudLocation)
+	err = client.StartInstance(instance.VMID, instance.Location)
 	if err != nil {
 		return errors.Wrapf(err, "Could not start instance '%s'", name)
 	}
@@ -406,7 +415,7 @@ func stopInstance(name string) error {
 	}
 
 	log.Infof("Stopping instance '%s' (%s)", instance.Name, instance.VMID)
-	err = client.StopInstance(instance.VMID, cloudLocation)
+	err = client.StopInstance(instance.VMID, instance.Location)
 	if err != nil {
 		return errors.Wrapf(err, "Could not stop instance '%s'", name)
 	}
