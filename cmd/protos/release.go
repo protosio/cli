@@ -191,8 +191,10 @@ func uploadLocalImageToCloud(imagePath string, imageName string, cloudName strin
 	if err != nil {
 		return errors.Wrap(err, errMsg)
 	}
-	if _, found := images[imageName]; found == true {
-		return errors.Wrap(fmt.Errorf("Found an image with name '%s'", imageName), errMsg)
+	for _, img := range images {
+		if img.Location == cloudLocation && img.Name == imageName {
+			return errors.Wrap(fmt.Errorf("Found an image with the same name"), errMsg)
+		}
 	}
 
 	_, err = client.UploadLocalImage(imagePath, imageName, cloudLocation)
