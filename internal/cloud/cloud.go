@@ -138,7 +138,8 @@ func findInSlice(slice []string, value string) (int, bool) {
 	return -1, false
 }
 
-func waitForPort(host string, port string, maxTries int) error {
+// WaitForPort is a utility method that waits until a specific port is open on a specific host
+func WaitForPort(host string, port string, maxTries int) error {
 	tries := 0
 	for {
 		timeout := time.Second
