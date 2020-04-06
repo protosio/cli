@@ -50,7 +50,7 @@ func newScalewayClient(name string) *scaleway {
 //
 
 func (sw *scaleway) SupportedLocations() []string {
-	return []string{string(scw.ZoneFrPar1), string(scw.ZoneFrPar2), string(scw.ZoneNlAms1)}
+	return []string{string(scw.ZoneFrPar1), string(scw.ZoneNlAms1)}
 }
 
 func (sw *scaleway) AuthFields() []string {
