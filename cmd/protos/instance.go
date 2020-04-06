@@ -6,7 +6,6 @@ import (
 	"os/signal"
 	"syscall"
 	"text/tabwriter"
-	"time"
 
 	"github.com/pkg/errors"
 	"github.com/protosio/cli/internal/cloud"
@@ -295,25 +294,17 @@ func deployInstance(instanceName string, cloudName string, cloudLocation string,
 		return cloud.InstanceInfo{}, errors.Wrapf(err, "Failed to save instance '%s'", instanceName)
 	}
 
+	err = cloud.WaitForPort(instanceInfo.PublicIP, "22", 20)
+	if err != nil {
+		return cloud.InstanceInfo{}, errors.Wrap(err, "Failed to deploy instance")
+	}
+
 	// wait for the instance to be up
 	log.Infof("Creating SSH tunnel to instance '%s'", instanceName)
 	tunnel := ssh.NewTunnel(instanceInfo.PublicIP+":22", "root", key.SSHAuth(), "localhost:8080", log)
-	tries := 0
-	var localPort int
-	for {
-		localPort, err = tunnel.Start()
-		if err != nil {
-			lerr := errors.Wrap(err, "Error while creating the SSH tunnel")
-			if tries == 20 {
-				return cloud.InstanceInfo{}, lerr
-			}
-			log.Debugf("Waiting for instance to be reachable: %v", lerr)
-			tries++
-			time.Sleep(3 * time.Second)
-			continue
-		} else {
-			break
-		}
+	localPort, err := tunnel.Start()
+	if err != nil {
+		return cloud.InstanceInfo{}, errors.Wrap(err, "Error while creating the SSH tunnel")
 	}
 
 	user, err := user.Get(envi)
