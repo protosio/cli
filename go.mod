@@ -1,9 +1,9 @@
 module github.com/protosio/cli
 
-go 1.13
+go 1.14
 
 require (
-	github.com/AlecAivazis/survey/v2 v2.0.5
+	github.com/AlecAivazis/survey/v2 v2.0.7
 	github.com/DataDog/zstd v1.4.4 // indirect
 	github.com/Masterminds/semver v1.5.0
 	github.com/Sereal/Sereal v0.0.0-20191211210414-3a6c62eca003 // indirect
