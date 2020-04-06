@@ -635,7 +635,30 @@ func (sw *scaleway) UploadLocalImage(imagePath string, imageName string, locatio
 	return imageResp.Image.ID, nil
 }
 
-func (sw *scaleway) RemoveImage(id string, location string) error {
+func (sw *scaleway) RemoveImage(name string, location string) error {
+	errMsg := fmt.Sprintf("Failed to remove image '%s' in '%s'", name, location)
+	if location == "" {
+		return errors.Wrap(fmt.Errorf("location is required for Scaleway"), errMsg)
+	}
+	// find image
+	images, err := sw.GetImages()
+	if err != nil {
+		return errors.Wrap(err, errMsg)
+	}
+	id := ""
+	for _, img := range images {
+		if img.Location == location && img.Name == name {
+			id = img.ID
+			break
+		}
+	}
+	if id == "" {
+		return errors.Wrap(fmt.Errorf("Could not find image '%s'", name), errMsg)
+	}
+	err = sw.instanceAPI.DeleteImage(&instance.DeleteImageRequest{ImageID: id, Zone: scw.Zone(location)})
+	if err != nil {
+		return errors.Wrap(err, errMsg)
+	}
 	return nil
 }
 

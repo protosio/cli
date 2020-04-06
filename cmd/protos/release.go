@@ -22,7 +22,7 @@ var cmdRelease *cli.Command = &cli.Command{
 	Subcommands: []*cli.Command{
 		{
 			Name:  "available",
-			Usage: "Shows the available Protosd releases",
+			Usage: "Show the available Protosd releases",
 			Action: func(c *cli.Context) error {
 				releases, err := getProtosAvailableReleases()
 				if err != nil {
@@ -35,7 +35,7 @@ var cmdRelease *cli.Command = &cli.Command{
 		{
 			Name:      "ls",
 			ArgsUsage: "<cloud name>",
-			Usage:     "Retrieves and lists the Protosd images available in a specific cloud provider",
+			Usage:     "Retrieve and list the Protosd images available in a specific cloud provider",
 			Action: func(c *cli.Context) error {
 				cloudName := c.Args().Get(0)
 				if cloudName == "" {
@@ -53,7 +53,7 @@ var cmdRelease *cli.Command = &cli.Command{
 		{
 			Name:      "upload",
 			ArgsUsage: "<image path> <image name>",
-			Usage:     "Uploads a locally built image to a cloud provider. Used for development",
+			Usage:     "Upload a locally built image to a cloud provider. Used for development",
 			Flags: []cli.Flag{
 				&cli.StringFlag{
 					Name:        "cloud",
@@ -76,12 +76,40 @@ var cmdRelease *cli.Command = &cli.Command{
 				}
 
 				imageName := c.Args().Get(1)
-				if imagePath == "" {
+				if imageName == "" {
 					cli.ShowSubcommandHelp(c)
 					os.Exit(1)
 				}
 
 				return uploadLocalImageToCloud(imagePath, imageName, cloudName, cloudLocation)
+			},
+		},
+		{
+			Name:      "delete",
+			ArgsUsage: "<image name>",
+			Usage:     "Delete an image from a cloud provider",
+			Flags: []cli.Flag{
+				&cli.StringFlag{
+					Name:        "cloud",
+					Usage:       "Specify which `CLOUD` provider to upload the image to",
+					Required:    true,
+					Destination: &cloudName,
+				},
+				&cli.StringFlag{
+					Name:        "location",
+					Usage:       "Specify one of the supported `LOCATION`s to upload the image (cloud specific). Not required for all cloud providers",
+					Required:    false,
+					Destination: &cloudLocation,
+				},
+			},
+			Action: func(c *cli.Context) error {
+				imageName := c.Args().Get(0)
+				if imageName == "" {
+					cli.ShowSubcommandHelp(c)
+					os.Exit(1)
+				}
+
+				return deleteImageFromCloud(imageName, cloudName, cloudLocation)
 			},
 		},
 	},
@@ -186,7 +214,7 @@ func uploadLocalImageToCloud(imagePath string, imageName string, cloudName strin
 		return errors.Wrapf(err, "Failed to connect to cloud provider '%s'(%s) API", cloudName, provider.Type.String())
 	}
 
-	// upload image
+	// find image
 	images, err := client.GetImages()
 	if err != nil {
 		return errors.Wrap(err, errMsg)
@@ -197,7 +225,30 @@ func uploadLocalImageToCloud(imagePath string, imageName string, cloudName strin
 		}
 	}
 
+	// upload image
 	_, err = client.UploadLocalImage(imagePath, imageName, cloudLocation)
+	if err != nil {
+		return errors.Wrap(err, errMsg)
+	}
+
+	return nil
+}
+
+func deleteImageFromCloud(imageName string, cloudName string, cloudLocation string) error {
+	errMsg := fmt.Sprintf("Failed to delete image '%s' from cloud '%s'", imageName, cloudName)
+	// init cloud
+	provider, err := dbp.GetCloud(cloudName)
+	if err != nil {
+		return errors.Wrapf(err, "Could not retrieve cloud '%s'", cloudName)
+	}
+	client := provider.Client()
+	err = client.Init(provider.Auth)
+	if err != nil {
+		return errors.Wrapf(err, "Failed to connect to cloud provider '%s'(%s) API", cloudName, provider.Type.String())
+	}
+
+	// delete image
+	err = client.RemoveImage(imageName, cloudLocation)
 	if err != nil {
 		return errors.Wrap(err, errMsg)
 	}
