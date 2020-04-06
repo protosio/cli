@@ -1,9 +1,14 @@
 package cloud
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
+	"os"
 	"strings"
 
+	scp "github.com/bramvdbogaerde/go-scp"
 	"github.com/pkg/errors"
 	"github.com/protosio/cli/internal/ssh"
 	account "github.com/scaleway/scaleway-sdk-go/api/account/v2alpha1"
@@ -11,6 +16,7 @@ import (
 	"github.com/scaleway/scaleway-sdk-go/api/marketplace/v1"
 	"github.com/scaleway/scaleway-sdk-go/scw"
 	log "github.com/sirupsen/logrus"
+	gssh "golang.org/x/crypto/ssh"
 )
 
 const (
@@ -44,14 +50,14 @@ func newScalewayClient(name string) *scaleway {
 //
 
 func (sw *scaleway) SupportedLocations() []string {
-	return []string{string(scw.ZoneFrPar1), string(scw.ZoneFrPar2), string(scw.ZoneNlAms1)}
+	return []string{string(scw.ZoneFrPar1), string(scw.ZoneNlAms1)}
 }
 
 func (sw *scaleway) AuthFields() []string {
 	return []string{"ORGANISATION_ID", "ACCESS_KEY", "SECRET_KEY"}
 }
 
-func (sw *scaleway) Init(auth map[string]string, location string) error {
+func (sw *scaleway) Init(auth map[string]string) error {
 	var err error
 
 	scwCredentials := &scalewayCredentials{}
@@ -72,12 +78,6 @@ func (sw *scaleway) Init(auth map[string]string, location string) error {
 	}
 
 	sw.auth = auth
-
-	if i, found := findInSlice(sw.SupportedLocations(), location); found {
-		sw.location = scw.Zone(sw.SupportedLocations()[i])
-	} else {
-		return errors.Errorf("Location '%s' not supported by Scaleway cloud provider", location)
-	}
 
 	sw.credentials = scwCredentials
 	sw.client, err = scw.NewClient(
@@ -102,9 +102,9 @@ func (sw *scaleway) GetInfo() ProviderInfo {
 	return ProviderInfo{Name: sw.name, Type: Scaleway, Auth: sw.auth}
 }
 
-func (sw *scaleway) SupportedMachines() (map[string]MachineSpec, error) {
+func (sw *scaleway) SupportedMachines(location string) (map[string]MachineSpec, error) {
 	vms := map[string]MachineSpec{}
-	inst, err := sw.instanceAPI.ListServersTypes(&instance.ListServersTypesRequest{Zone: scw.ZoneFrPar1})
+	inst, err := sw.instanceAPI.ListServersTypes(&instance.ListServersTypesRequest{Zone: scw.Zone(location)})
 	if err != nil {
 		return vms, errors.Wrap(err, "Failed to retrieve Scaleway instance types")
 	}
@@ -147,7 +147,7 @@ func (sw *scaleway) deleteSSHkey(name string) error {
 }
 
 // NewInstance creates a new Protos instance on Scaleway
-func (sw *scaleway) NewInstance(name string, imageID string, pubKey string, machineType string) (string, error) {
+func (sw *scaleway) NewInstance(name string, imageID string, pubKey string, machineType string, location string) (string, error) {
 
 	//
 	// create SSH key
@@ -174,13 +174,13 @@ func (sw *scaleway) NewInstance(name string, imageID string, pubKey string, mach
 	// create server
 
 	// checking if there is a server with the same name
-	serversResp, err := sw.instanceAPI.ListServers(&instance.ListServersRequest{Zone: sw.location})
+	serversResp, err := sw.instanceAPI.ListServers(&instance.ListServersRequest{Zone: scw.Zone(location)})
 	if err != nil {
 		return "", errors.Wrap(err, "Failed to retrieve servers")
 	}
 	for _, srv := range serversResp.Servers {
 		if srv.Name == name {
-			return "", errors.Errorf("There is already an instance with name '%s' on Scaleway, in zone '%s'", name, sw.location)
+			return "", errors.Errorf("There is already an instance with name '%s' on Scaleway, in zone '%s'", name, scw.Zone(location))
 		}
 	}
 
@@ -190,7 +190,7 @@ func (sw *scaleway) NewInstance(name string, imageID string, pubKey string, mach
 	ipreq := true
 	req := &instance.CreateServerRequest{
 		Name:              name,
-		Zone:              sw.location,
+		Zone:              scw.Zone(location),
 		CommercialType:    machineType,
 		DynamicIPRequired: &ipreq,
 		EnableIPv6:        false,
@@ -208,12 +208,12 @@ func (sw *scaleway) NewInstance(name string, imageID string, pubKey string, mach
 	return srvResp.Server.ID, nil
 }
 
-func (sw *scaleway) DeleteInstance(id string) error {
-	info, err := sw.GetInstanceInfo(id)
+func (sw *scaleway) DeleteInstance(id string, location string) error {
+	info, err := sw.GetInstanceInfo(id, location)
 	if err != nil {
 		return errors.Wrapf(err, "Failed to retrieve instance '%s'", id)
 	}
-	err = sw.instanceAPI.DeleteServer(&instance.DeleteServerRequest{Zone: sw.location, ServerID: id})
+	err = sw.instanceAPI.DeleteServer(&instance.DeleteServerRequest{Zone: scw.Zone(location), ServerID: id})
 	if err != nil {
 		return errors.Wrapf(err, "Failed to delete instance '%s'", id)
 	}
@@ -224,10 +224,10 @@ func (sw *scaleway) DeleteInstance(id string) error {
 	return nil
 }
 
-func (sw *scaleway) StartInstance(id string) error {
+func (sw *scaleway) StartInstance(id string, location string) error {
 	startReq := &instance.ServerActionAndWaitRequest{
 		ServerID: id,
-		Zone:     sw.location,
+		Zone:     scw.Zone(location),
 		Action:   instance.ServerActionPoweron,
 	}
 	err := sw.instanceAPI.ServerActionAndWait(startReq)
@@ -237,10 +237,10 @@ func (sw *scaleway) StartInstance(id string) error {
 	return nil
 }
 
-func (sw *scaleway) StopInstance(id string) error {
+func (sw *scaleway) StopInstance(id string, location string) error {
 	stopReq := &instance.ServerActionAndWaitRequest{
 		ServerID: id,
-		Zone:     sw.location,
+		Zone:     scw.Zone(scw.Zone(location)),
 		Action:   instance.ServerActionPoweroff,
 	}
 	err := sw.instanceAPI.ServerActionAndWait(stopReq)
@@ -250,12 +250,12 @@ func (sw *scaleway) StopInstance(id string) error {
 	return nil
 }
 
-func (sw *scaleway) GetInstanceInfo(id string) (InstanceInfo, error) {
-	resp, err := sw.instanceAPI.GetServer(&instance.GetServerRequest{ServerID: id, Zone: sw.location})
+func (sw *scaleway) GetInstanceInfo(id string, location string) (InstanceInfo, error) {
+	resp, err := sw.instanceAPI.GetServer(&instance.GetServerRequest{ServerID: id, Zone: scw.Zone(location)})
 	if err != nil {
 		return InstanceInfo{}, errors.Wrapf(err, "Failed to retrieve Scaleway instance (%s) information", id)
 	}
-	info := InstanceInfo{VMID: id, Name: resp.Server.Name, CloudName: sw.name, CloudType: Scaleway, Location: string(sw.location)}
+	info := InstanceInfo{VMID: id, Name: resp.Server.Name, CloudName: sw.name, CloudType: Scaleway, Location: string(scw.Zone(location))}
 	if resp.Server.PublicIP != nil {
 		info.PublicIP = resp.Server.PublicIP.Address.String()
 	}
@@ -269,19 +269,46 @@ func (sw *scaleway) GetInstanceInfo(id string) (InstanceInfo, error) {
 // Images methods
 //
 
-func (sw *scaleway) GetImages() (map[string]string, error) {
-	images := map[string]string{}
-	resp, err := sw.instanceAPI.ListImages(&instance.ListImagesRequest{Zone: sw.location})
-	if err != nil {
-		return images, errors.Wrap(err, "Failed to retrieve account images from Scaleway")
-	}
-	for _, img := range resp.Images {
-		images[img.Name] = img.ID
+func (sw *scaleway) GetImages() (map[string]ImageInfo, error) {
+	images := map[string]ImageInfo{}
+	locations := sw.SupportedLocations()
+	for _, location := range locations {
+		resp, err := sw.instanceAPI.ListImages(&instance.ListImagesRequest{Zone: scw.Zone(location)})
+		if err != nil {
+			return images, errors.Wrap(err, "Failed to retrieve account images from Scaleway")
+		}
+		for _, img := range resp.Images {
+			if strings.Contains(img.Name, "protos-") {
+				imgName := strings.TrimPrefix(img.Name, "protos-")
+				images[img.ID] = ImageInfo{Name: imgName, ID: img.ID, Location: location}
+			} else {
+				images[img.ID] = ImageInfo{Name: img.Name, ID: img.ID, Location: location}
+			}
+		}
 	}
 	return images, nil
 }
 
-func (sw *scaleway) AddImage(url string, hash string, version string) (string, error) {
+func (sw *scaleway) GetProtosImages() (map[string]ImageInfo, error) {
+	images := map[string]ImageInfo{}
+	locations := sw.SupportedLocations()
+	for _, location := range locations {
+		resp, err := sw.instanceAPI.ListImages(&instance.ListImagesRequest{Zone: scw.Zone(location)})
+		if err != nil {
+			return images, errors.Wrap(err, "Failed to retrieve account images from Scaleway")
+		}
+		for _, img := range resp.Images {
+			if strings.Contains(img.Name, "protos-") {
+				imgName := strings.TrimPrefix(img.Name, "protos-")
+				images[img.ID] = ImageInfo{Name: imgName, ID: img.ID, Location: location}
+			}
+		}
+	}
+
+	return images, nil
+}
+
+func (sw *scaleway) AddImage(url string, hash string, version string, location string) (string, error) {
 
 	//
 	// create and add ssh key to account
@@ -303,7 +330,7 @@ func (sw *scaleway) AddImage(url string, hash string, version string) (string, e
 	// find correct image
 	//
 
-	imageID, err := sw.getUploadImageID(sw.location)
+	imageID, err := sw.getUploadImageID(scw.Zone(location))
 	if err != nil {
 		return "", errors.Wrap(err, "Failed to add Protos image to Scaleway")
 	}
@@ -314,15 +341,21 @@ func (sw *scaleway) AddImage(url string, hash string, version string) (string, e
 	// create upload server
 	//
 
-	srv, vol, err := sw.createImageUploadVM(imageID)
+	srv, vol, err := sw.createImageUploadVM(imageID, location)
 	if err != nil {
 		return "", errors.Wrap(err, "Failed to add Protos image to Scaleway")
 	}
-	defer sw.cleanImageUploadVM(srv)
+	defer sw.cleanImageUploadVM(srv, location)
 
 	//
 	// connect via SSH, download Protos image and write it to a volume
 	//
+
+	log.Infof("Waiting for SSH service to be reachable at '%s'", srv.PublicIP.Address.String()+":22")
+	err = waitForPort(srv.PublicIP.Address.String(), "22", 25)
+	if err != nil {
+		return "", errors.Wrap(err, "Failed to add Protos image to Scaleway")
+	}
 
 	log.Info("Trying to connect to Scaleway upload instance over SSH")
 
@@ -332,9 +365,6 @@ func (sw *scaleway) AddImage(url string, hash string, version string) (string, e
 	}
 	log.Info("SSH connection initiated")
 
-	//
-	// wite Protos image to volume
-	//
 	localISO := "/tmp/protos-scaleway.iso"
 
 	log.Info("Downloading Protos image")
@@ -351,6 +381,10 @@ func (sw *scaleway) AddImage(url string, hash string, version string) (string, e
 		log.Errorf("Image integrity check failed: %s: %s", out, err.Error())
 		return "", errors.Wrap(err, "Failed to add Protos image to Scaleway. Error downloading Protos VM image. Integrity check failed")
 	}
+
+	//
+	// wite Protos image to volume
+	//
 
 	out, err = ssh.ExecuteCommand("ls /dev/vdb", sshClient)
 	if err != nil {
@@ -372,7 +406,7 @@ func (sw *scaleway) AddImage(url string, hash string, version string) (string, e
 	log.Infof("Stopping upload server '%s' (%s)", srv.Name, srv.ID)
 	stopReq := &instance.ServerActionAndWaitRequest{
 		ServerID: srv.ID,
-		Zone:     sw.location,
+		Zone:     scw.Zone(location),
 		Action:   instance.ServerActionPoweroff,
 	}
 	err = sw.instanceAPI.ServerActionAndWait(stopReq)
@@ -380,7 +414,7 @@ func (sw *scaleway) AddImage(url string, hash string, version string) (string, e
 		return "", errors.Wrap(err, "Failed to add Protos image to Scaleway. Error while stopping upload server")
 	}
 
-	_, err = sw.instanceAPI.DetachVolume(&instance.DetachVolumeRequest{Zone: sw.location, VolumeID: vol.ID})
+	_, err = sw.instanceAPI.DetachVolume(&instance.DetachVolumeRequest{Zone: scw.Zone(location), VolumeID: vol.ID})
 	if err != nil {
 		return "", errors.Wrap(err, "Failed to add Protos image to Scaleway. Error while detaching image volume")
 	}
@@ -393,7 +427,7 @@ func (sw *scaleway) AddImage(url string, hash string, version string) (string, e
 	snapshotResp, err := sw.instanceAPI.CreateSnapshot(&instance.CreateSnapshotRequest{
 		VolumeID: vol.ID,
 		Name:     "protos-snapshot-" + version,
-		Zone:     sw.location,
+		Zone:     scw.Zone(location),
 	})
 	if err != nil {
 		return "", errors.Wrap(err, "Failed to add Protos image to Scaleway. Error while creating snapshot from volume")
@@ -404,7 +438,7 @@ func (sw *scaleway) AddImage(url string, hash string, version string) (string, e
 		Name:       "protos-" + version,
 		Arch:       instance.ArchX86_64,
 		RootVolume: snapshotResp.Snapshot.ID,
-		Zone:       sw.location,
+		Zone:       scw.Zone(location),
 	})
 	if err != nil {
 		return "", errors.Wrap(err, "Failed to add Protos image to Scaleway. Error while creating image from snapshot")
@@ -412,7 +446,7 @@ func (sw *scaleway) AddImage(url string, hash string, version string) (string, e
 	log.Infof("Protos image '%s' created", imageResp.Image.ID)
 
 	log.Infof("Deleting protos image volume '%s'", vol.ID)
-	err = sw.instanceAPI.DeleteVolume(&instance.DeleteVolumeRequest{Zone: sw.location, VolumeID: vol.ID})
+	err = sw.instanceAPI.DeleteVolume(&instance.DeleteVolumeRequest{Zone: scw.Zone(location), VolumeID: vol.ID})
 	if err != nil {
 		return "", errors.Wrap(err, "Error while removing protos image volume. Manual clean might be needed")
 	}
@@ -420,7 +454,222 @@ func (sw *scaleway) AddImage(url string, hash string, version string) (string, e
 	return imageResp.Image.ID, nil
 }
 
-func (sw *scaleway) RemoveImage(id string) error {
+func (sw *scaleway) UploadLocalImage(imagePath string, imageName string, location string) (id string, err error) {
+
+	errMsg := "Failed to upload Protos image to Scaleway"
+	protosImage := "protos-" + imageName
+
+	fdHash, err := os.Open(imagePath)
+	if err != nil {
+		return "", errors.Wrap(err, errMsg)
+	}
+	defer fdHash.Close()
+
+	h := sha256.New()
+	if _, err := io.Copy(h, fdHash); err != nil {
+		return "", errors.Wrap(err, errMsg)
+	}
+
+	imageHash := hex.EncodeToString(h.Sum(nil))
+
+	//
+	// Create and add a temporary ssh key to account
+	//
+
+	key, err := ssh.GenerateKey()
+	if err != nil {
+		return "", errors.Wrap(err, errMsg)
+	}
+	pubKey := strings.TrimSuffix(key.Public(), "\n") + " root@protos.io"
+
+	sshKey, err := sw.accountAPI.CreateSSHKey(&account.CreateSSHKeyRequest{Name: uploadSSHkey, OrganizationID: sw.credentials.organisationID, PublicKey: pubKey})
+	if err != nil {
+		return "", errors.Wrap(err, errMsg+". Failed to add temporary SSH key")
+	}
+	defer sw.cleanImageSSHkeys(sshKey.ID)
+
+	//
+	// Create upload server
+	//
+
+	imageID, err := sw.getUploadImageID(scw.Zone(location))
+	if err != nil {
+		return "", errors.Wrap(err, errMsg)
+	}
+	log.Infof("Using image '%s' for adding Protos image to Scaleway", imageID)
+
+	srv, vol, err := sw.createImageUploadVM(imageID, location)
+	if err != nil {
+		return "", errors.Wrap(err, errMsg)
+	}
+	defer sw.cleanImageUploadVM(srv, location)
+
+	//
+	// Upload image via SCP
+	//
+
+	log.Infof("Waiting for SSH service to be reachable at '%s'", srv.PublicIP.Address.String()+":22")
+	err = waitForPort(srv.PublicIP.Address.String(), "22", 25)
+	if err != nil {
+		return "", errors.Wrap(err, errMsg)
+	}
+
+	sshConfig := &gssh.ClientConfig{
+		User: "root",
+		Auth: []gssh.AuthMethod{
+			key.SSHAuth(),
+		},
+		HostKeyCallback: gssh.InsecureIgnoreHostKey(),
+	}
+
+	client := scp.NewClient(srv.PublicIP.Address.String()+":22", sshConfig)
+	log.Infof("Connecting via SSH and starting SCP transfer to '%s'", srv.PublicIP.Address.String()+":22")
+	err = client.Connect()
+	if err != nil {
+		return "", errors.Wrap(err, errMsg)
+	}
+	defer client.Close()
+
+	fdUpload, err := os.Open(imagePath)
+	if err != nil {
+		return "", errors.Wrap(err, errMsg)
+	}
+	defer fdUpload.Close()
+
+	log.Info("Uploading image. This can take a while...")
+	remoteImage := "/tmp/" + protosImage
+	err = client.CopyFile(fdUpload, remoteImage, "0655")
+	if err != nil {
+		return "", errors.Wrap(err, errMsg)
+	}
+
+	//
+	// connect via SSH and check the integrity of the image
+	//
+
+	log.Info("Trying to connect to Scaleway upload instance over SSH")
+
+	sshClient, err := ssh.NewConnection(srv.PublicIP.Address.String(), "root", key.SSHAuth(), 10)
+	if err != nil {
+		return "", errors.Wrap(err, errMsg+". Failed to deploy VM to Scaleway")
+	}
+	log.Info("SSH connection initiated")
+
+	log.Info("Checking image integrity")
+	cmdString := fmt.Sprintf("openssl dgst -r -sha256 %s | awk '{ print $1 }' | { read digest; if [ \"$digest\" = \"%s\" ]; then true; else false; fi }", remoteImage, imageHash)
+	out, err := ssh.ExecuteCommand(cmdString, sshClient)
+	if err != nil {
+		log.Errorf("Image integrity check failed: %s: %s", out, err.Error())
+		return "", errors.Wrap(err, errMsg+". Integrity check failed")
+	}
+
+	//
+	// wite Protos image to volume
+	//
+
+	out, err = ssh.ExecuteCommand("ls /dev/vdb", sshClient)
+	if err != nil {
+		log.Errorf("Snapshot volume not found: %s", out)
+		return "", errors.Wrap(err, errMsg+". Snapshot volume not found")
+	}
+
+	log.Info("Writing Protos image to volume")
+	out, err = ssh.ExecuteCommand("dd if="+remoteImage+" of=/dev/vdb", sshClient)
+	if err != nil {
+		log.Errorf("Error while writing image to volume: %s", out)
+		return "", errors.Wrap(err, errMsg+". Error while writing image to volume")
+	}
+
+	//
+	// turn off upload VM and dettach volume
+	//
+
+	log.Infof("Stopping upload server '%s' (%s)", srv.Name, srv.ID)
+	stopReq := &instance.ServerActionAndWaitRequest{
+		ServerID: srv.ID,
+		Zone:     scw.Zone(location),
+		Action:   instance.ServerActionPoweroff,
+	}
+	err = sw.instanceAPI.ServerActionAndWait(stopReq)
+	if err != nil {
+		return "", errors.Wrap(err, errMsg+". Error while stopping upload server")
+	}
+
+	_, err = sw.instanceAPI.DetachVolume(&instance.DetachVolumeRequest{Zone: scw.Zone(location), VolumeID: vol.ID})
+	if err != nil {
+		return "", errors.Wrap(err, errMsg+". Error while detaching image volume")
+	}
+
+	//
+	// create snapshot and image
+	//
+
+	log.Info("Creating snapshot from volume")
+	snapshotResp, err := sw.instanceAPI.CreateSnapshot(&instance.CreateSnapshotRequest{
+		VolumeID: vol.ID,
+		Name:     "protos-snapshot-" + imageName,
+		Zone:     scw.Zone(location),
+	})
+	if err != nil {
+		return "", errors.Wrap(err, errMsg+". Error while creating snapshot from volume")
+	}
+
+	log.Info("Creating image from snapshot")
+	imageResp, err := sw.instanceAPI.CreateImage(&instance.CreateImageRequest{
+		Name:       protosImage,
+		Arch:       instance.ArchX86_64,
+		RootVolume: snapshotResp.Snapshot.ID,
+		Zone:       scw.Zone(location),
+	})
+	if err != nil {
+		return "", errors.Wrap(err, errMsg+". Error while creating image from snapshot")
+	}
+	log.Infof("Protos image '%s(%s)' created", protosImage, imageResp.Image.ID)
+
+	log.Infof("Deleting protos image volume '%s'", vol.ID)
+	err = sw.instanceAPI.DeleteVolume(&instance.DeleteVolumeRequest{Zone: scw.Zone(location), VolumeID: vol.ID})
+	if err != nil {
+		return "", errors.Wrap(err, "Error while removing protos image volume. Manual clean might be needed")
+	}
+
+	return imageResp.Image.ID, nil
+}
+
+func (sw *scaleway) RemoveImage(name string, location string) error {
+	errMsg := fmt.Sprintf("Failed to remove image '%s' in '%s'", name, location)
+	if location == "" {
+		return errors.Wrap(fmt.Errorf("location is required for Scaleway"), errMsg)
+	}
+	// find image
+	images, err := sw.GetProtosImages()
+	if err != nil {
+		return errors.Wrap(err, errMsg)
+	}
+	id := ""
+	for _, img := range images {
+		if img.Location == location && img.Name == name {
+			id = img.ID
+			break
+		}
+	}
+	if id == "" {
+		return errors.Wrap(fmt.Errorf("Could not find image '%s'", name), errMsg)
+	}
+	img, err := sw.instanceAPI.GetImage(&instance.GetImageRequest{ImageID: id, Zone: scw.Zone(location)})
+	if err != nil {
+		return errors.Wrap(err, errMsg)
+	}
+
+	err = sw.instanceAPI.DeleteImage(&instance.DeleteImageRequest{ImageID: id, Zone: scw.Zone(location)})
+	if err != nil {
+		return errors.Wrap(err, errMsg)
+	}
+
+	err = sw.instanceAPI.DeleteSnapshot(&instance.DeleteSnapshotRequest{SnapshotID: img.Image.RootVolume.ID, Zone: scw.Zone(location)})
+	if err != nil {
+		return errors.Wrap(err, errMsg)
+	}
+
 	return nil
 }
 
@@ -428,13 +677,13 @@ func (sw *scaleway) RemoveImage(id string) error {
 // Volumes methods
 //
 
-func (sw *scaleway) NewVolume(name string, size int) (string, error) {
+func (sw *scaleway) NewVolume(name string, size int, location string) (string, error) {
 	sizeVolume := scw.Size(uint64(size * 1048576))
 	createVolumeReq := &instance.CreateVolumeRequest{
 		Name:       name,
 		VolumeType: "b_ssd",
 		Size:       &sizeVolume,
-		Zone:       sw.location,
+		Zone:       scw.Zone(location),
 	}
 
 	volumeResp, err := sw.instanceAPI.CreateVolume(createVolumeReq)
@@ -444,10 +693,10 @@ func (sw *scaleway) NewVolume(name string, size int) (string, error) {
 	return volumeResp.Volume.ID, nil
 }
 
-func (sw *scaleway) DeleteVolume(id string) error {
+func (sw *scaleway) DeleteVolume(id string, location string) error {
 	deleteVolumeReq := &instance.DeleteVolumeRequest{
 		VolumeID: id,
-		Zone:     sw.location,
+		Zone:     scw.Zone(location),
 	}
 	err := sw.instanceAPI.DeleteVolume(deleteVolumeReq)
 	if err != nil {
@@ -456,9 +705,9 @@ func (sw *scaleway) DeleteVolume(id string) error {
 	return nil
 }
 
-func (sw *scaleway) AttachVolume(volumeID string, instanceID string) error {
+func (sw *scaleway) AttachVolume(volumeID string, instanceID string, location string) error {
 	attachVolumeReq := &instance.AttachVolumeRequest{
-		Zone:     sw.location,
+		Zone:     scw.Zone(location),
 		VolumeID: volumeID,
 		ServerID: instanceID,
 	}
@@ -469,9 +718,9 @@ func (sw *scaleway) AttachVolume(volumeID string, instanceID string) error {
 	return nil
 }
 
-func (sw *scaleway) DettachVolume(volumeID string, instanceID string) error {
+func (sw *scaleway) DettachVolume(volumeID string, instanceID string, location string) error {
 	detachVolumeReq := &instance.DetachVolumeRequest{
-		Zone:     sw.location,
+		Zone:     scw.Zone(location),
 		VolumeID: volumeID,
 	}
 	_, err := sw.instanceAPI.DetachVolume(detachVolumeReq)
@@ -512,7 +761,7 @@ func (sw *scaleway) cleanImageSSHkeys(keyID string) {
 	log.Infof("Deleted SSH key '%s'", keyID)
 }
 
-func (sw *scaleway) createImageUploadVM(imageID string) (*instance.Server, *instance.Volume, error) {
+func (sw *scaleway) createImageUploadVM(imageID string, location string) (*instance.Server, *instance.Volume, error) {
 
 	//
 	// create volume
@@ -523,7 +772,7 @@ func (sw *scaleway) createImageUploadVM(imageID string) (*instance.Server, *inst
 		Name:       "protos-image-uploader",
 		VolumeType: "l_ssd",
 		Size:       &size,
-		Zone:       sw.location,
+		Zone:       scw.Zone(location),
 	}
 
 	log.Info("Creating image volume")
@@ -545,7 +794,7 @@ func (sw *scaleway) createImageUploadVM(imageID string) (*instance.Server, *inst
 	ipreq := true
 	req := &instance.CreateServerRequest{
 		Name:              "protos-image-uploader",
-		Zone:              sw.location,
+		Zone:              scw.Zone(location),
 		CommercialType:    "DEV1-S",
 		DynamicIPRequired: &ipreq,
 		EnableIPv6:        false,
@@ -568,7 +817,7 @@ func (sw *scaleway) createImageUploadVM(imageID string) (*instance.Server, *inst
 	attachVolumeReq := &instance.AttachVolumeRequest{
 		ServerID: srvResp.Server.ID,
 		VolumeID: volumeResp.Volume.ID,
-		Zone:     sw.location,
+		Zone:     scw.Zone(location),
 	}
 
 	_, err = sw.instanceAPI.AttachVolume(attachVolumeReq)
@@ -584,7 +833,7 @@ func (sw *scaleway) createImageUploadVM(imageID string) (*instance.Server, *inst
 	log.Infof("Starting and waiting for server '%s' (%s)", srvResp.Server.Name, srvResp.Server.ID)
 	startReq := &instance.ServerActionAndWaitRequest{
 		ServerID: srvResp.Server.ID,
-		Zone:     sw.location,
+		Zone:     scw.Zone(location),
 		Action:   instance.ServerActionPoweron,
 	}
 	err = sw.instanceAPI.ServerActionAndWait(startReq)
@@ -597,7 +846,7 @@ func (sw *scaleway) createImageUploadVM(imageID string) (*instance.Server, *inst
 	// refresh IP info
 	//
 
-	srvStatusResp, err := sw.instanceAPI.GetServer(&instance.GetServerRequest{ServerID: srvResp.Server.ID, Zone: sw.location})
+	srvStatusResp, err := sw.instanceAPI.GetServer(&instance.GetServerRequest{ServerID: srvResp.Server.ID, Zone: scw.Zone(location)})
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "Failed to retrieve upload VM details")
 	}
@@ -605,8 +854,8 @@ func (sw *scaleway) createImageUploadVM(imageID string) (*instance.Server, *inst
 	return srvStatusResp.Server, volumeResp.Volume, nil
 }
 
-func (sw *scaleway) cleanImageUploadVM(srv *instance.Server) {
-	srvStatusResp, err := sw.instanceAPI.GetServer(&instance.GetServerRequest{ServerID: srv.ID, Zone: sw.location})
+func (sw *scaleway) cleanImageUploadVM(srv *instance.Server, location string) {
+	srvStatusResp, err := sw.instanceAPI.GetServer(&instance.GetServerRequest{ServerID: srv.ID, Zone: scw.Zone(location)})
 	if err != nil {
 		log.Error(errors.Wrap(err, "Failed to refresh upload server info"))
 		return
@@ -618,7 +867,7 @@ func (sw *scaleway) cleanImageUploadVM(srv *instance.Server) {
 		log.Infof("Stopping and waiting for server '%s' (%s)", srv.Name, srv.ID)
 		stopReq := &instance.ServerActionAndWaitRequest{
 			ServerID: srv.ID,
-			Zone:     sw.location,
+			Zone:     scw.Zone(location),
 			Action:   instance.ServerActionPoweroff,
 		}
 		err = sw.instanceAPI.ServerActionAndWait(stopReq)
@@ -631,19 +880,19 @@ func (sw *scaleway) cleanImageUploadVM(srv *instance.Server) {
 
 	for _, vol := range srv.Volumes {
 		log.Infof("Deleting volume '%s' for server '%s' (%s)", vol.ID, srv.Name, srv.ID)
-		_, err = sw.instanceAPI.DetachVolume(&instance.DetachVolumeRequest{Zone: sw.location, VolumeID: vol.ID})
+		_, err = sw.instanceAPI.DetachVolume(&instance.DetachVolumeRequest{Zone: scw.Zone(location), VolumeID: vol.ID})
 		if err != nil {
 			log.Errorf("Failed to dettach volume '%s' for server '%s' (%s): %s", vol.ID, srv.Name, srv.ID, err.Error())
 			continue
 		}
-		err = sw.instanceAPI.DeleteVolume(&instance.DeleteVolumeRequest{Zone: sw.location, VolumeID: vol.ID})
+		err = sw.instanceAPI.DeleteVolume(&instance.DeleteVolumeRequest{Zone: scw.Zone(location), VolumeID: vol.ID})
 		if err != nil {
 			log.Errorf("Failed to delete volume '%s' for server '%s' (%s): %s", vol.ID, srv.Name, srv.ID, err.Error())
 		}
 	}
 
 	log.Infof("Deleting server '%s' (%s)", srv.Name, srv.ID)
-	err = sw.instanceAPI.DeleteServer(&instance.DeleteServerRequest{ServerID: srv.ID, Zone: sw.location})
+	err = sw.instanceAPI.DeleteServer(&instance.DeleteServerRequest{ServerID: srv.ID, Zone: scw.Zone(location)})
 	if err != nil {
 		log.Error(errors.Wrap(err, "Failed to add Protos image to Scaleway"))
 		return

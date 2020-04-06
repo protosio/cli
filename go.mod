@@ -1,14 +1,15 @@
 module github.com/protosio/cli
 
-go 1.13
+go 1.14
 
 require (
-	github.com/AlecAivazis/survey/v2 v2.0.5
-	github.com/DataDog/zstd v1.4.4 // indirect
+	github.com/AlecAivazis/survey/v2 v2.0.7
+	github.com/DataDog/zstd v1.4.5 // indirect
 	github.com/Masterminds/semver v1.5.0
-	github.com/Sereal/Sereal v0.0.0-20191211210414-3a6c62eca003 // indirect
-	github.com/asdine/genji v0.4.0
+	github.com/Sereal/Sereal v0.0.0-20200326150110-2c0ed69a855f // indirect
 	github.com/asdine/storm v2.1.2+incompatible
+	github.com/bramvdbogaerde/go-scp v0.0.0-20200119201711-987556b8bdd7
+	github.com/golang/protobuf v1.3.5 // indirect
 	github.com/golang/snappy v0.0.1 // indirect
 	github.com/konsorten/go-windows-terminal-sequences v1.0.2 // indirect
 	github.com/kr/pretty v0.1.0 // indirect
@@ -18,9 +19,9 @@ require (
 	github.com/sirupsen/logrus v1.4.2
 	github.com/urfave/cli/v2 v2.0.0
 	github.com/vmihailenco/msgpack v4.0.4+incompatible // indirect
+	go.etcd.io/bbolt v1.3.4 // indirect
 	golang.org/x/crypto v0.0.0-20191122220453-ac88ee75c92c
 	golang.org/x/net v0.0.0-20190628185345-da137c7871d7 // indirect
-	google.golang.org/appengine v1.6.1
-	google.golang.org/genproto v0.0.0-20200128133413-58ce757ed39b
+	google.golang.org/appengine v1.6.1 // indirect
 	gopkg.in/check.v1 v1.0.0-20180628173108-788fd7840127 // indirect
 )

@@ -18,15 +18,100 @@ const (
 
 var cmdRelease *cli.Command = &cli.Command{
 	Name:  "release",
-	Usage: "Lists the latest available Protos releases",
-	Action: func(c *cli.Context) error {
+	Usage: "Manage Protos releases",
+	Subcommands: []*cli.Command{
+		{
+			Name:  "available",
+			Usage: "Show the available Protosd releases",
+			Action: func(c *cli.Context) error {
+				releases, err := getProtosAvailableReleases()
+				if err != nil {
+					return err
+				}
+				printProtosAvailableReleases(releases)
+				return nil
+			},
+		},
+		{
+			Name:      "ls",
+			ArgsUsage: "<cloud name>",
+			Usage:     "Retrieve and list the Protosd images available in a specific cloud provider",
+			Action: func(c *cli.Context) error {
+				cloudName := c.Args().Get(0)
+				if cloudName == "" {
+					cli.ShowSubcommandHelp(c)
+					os.Exit(1)
+				}
 
-		releases, err := getProtosReleases()
-		if err != nil {
-			return err
-		}
-		printProtosReleases(releases)
-		return nil
+				err := printProtosCloudImages(cloudName)
+				if err != nil {
+					return err
+				}
+				return nil
+			},
+		},
+		{
+			Name:      "upload",
+			ArgsUsage: "<image path> <image name>",
+			Usage:     "Upload a locally built image to a cloud provider. Used for development",
+			Flags: []cli.Flag{
+				&cli.StringFlag{
+					Name:        "cloud",
+					Usage:       "Specify which `CLOUD` provider to upload the image to",
+					Required:    true,
+					Destination: &cloudName,
+				},
+				&cli.StringFlag{
+					Name:        "location",
+					Usage:       "Specify one of the supported `LOCATION`s to upload the image (cloud specific). Not required for all cloud providers",
+					Required:    false,
+					Destination: &cloudLocation,
+				},
+			},
+			Action: func(c *cli.Context) error {
+				imagePath := c.Args().Get(0)
+				if imagePath == "" {
+					cli.ShowSubcommandHelp(c)
+					os.Exit(1)
+				}
+
+				imageName := c.Args().Get(1)
+				if imageName == "" {
+					cli.ShowSubcommandHelp(c)
+					os.Exit(1)
+				}
+
+				return uploadLocalImageToCloud(imagePath, imageName, cloudName, cloudLocation)
+			},
+		},
+		{
+			Name:      "delete",
+			ArgsUsage: "<image name>",
+			Usage:     "Delete an image from a cloud provider",
+			Flags: []cli.Flag{
+				&cli.StringFlag{
+					Name:        "cloud",
+					Usage:       "Specify which `CLOUD` provider to upload the image to",
+					Required:    true,
+					Destination: &cloudName,
+				},
+				&cli.StringFlag{
+					Name:        "location",
+					Usage:       "Specify one of the supported `LOCATION`s to upload the image (cloud specific). Not required for all cloud providers",
+					Required:    false,
+					Destination: &cloudLocation,
+				},
+			},
+			Action: func(c *cli.Context) error {
+				imageName := c.Args().Get(0)
+				if imageName == "" {
+					cli.ShowSubcommandHelp(c)
+					os.Exit(1)
+				}
+
+				return deleteImageFromCloud(imageName, cloudName, cloudLocation)
+			},
+		},
 	},
 }
 
@@ -34,7 +119,7 @@ var cmdRelease *cli.Command = &cli.Command{
 // Releases methods
 //
 
-func printProtosReleases(releases release.Releases) {
+func printProtosAvailableReleases(releases release.Releases) {
 	w := new(tabwriter.Writer)
 	w.Init(os.Stdout, 0, 0, 2, ' ', 0)
 
@@ -48,7 +133,7 @@ func printProtosReleases(releases release.Releases) {
 	fmt.Fprint(w, "\n")
 }
 
-func getProtosReleases() (release.Releases, error) {
+func getProtosAvailableReleases() (release.Releases, error) {
 	var releases release.Releases
 	resp, err := http.Get(releasesURL)
 	if err != nil {
@@ -66,4 +151,107 @@ func getProtosReleases() (release.Releases, error) {
 	}
 
 	return releases, nil
+}
+
+func printProtosCloudImages(cloudName string) error {
+
+	// init cloud
+	provider, err := dbp.GetCloud(cloudName)
+	if err != nil {
+		return errors.Wrapf(err, "Could not retrieve cloud '%s'", cloudName)
+	}
+	client := provider.Client()
+	err = client.Init(provider.Auth)
+	if err != nil {
+		return errors.Wrapf(err, "Failed to connect to cloud provider '%s'(%s) API", cloudName, provider.Type.String())
+	}
+
+	images, err := client.GetProtosImages()
+	if err != nil {
+		return errors.Wrapf(err, "Failed to retrieve cloud images")
+	}
+
+	//
+	// do the printing
+	//
+	w := new(tabwriter.Writer)
+	w.Init(os.Stdout, 0, 0, 2, ' ', 0)
+
+	defer w.Flush()
+
+	fmt.Fprintf(w, " %s\t%s\t%s\t", "Version", "ID", "Location")
+	fmt.Fprintf(w, "\n %s\t%s\t%s\t", "-------", "--", "--------")
+	for _, img := range images {
+		fmt.Fprintf(w, "\n %s\t%s\t%s\t", img.Name, img.ID, img.Location)
+	}
+	fmt.Fprint(w, "\n")
+
+	return nil
+}
+
+func uploadLocalImageToCloud(imagePath string, imageName string, cloudName string, cloudLocation string) error {
+	errMsg := fmt.Sprintf("Failed to upload local image '%s' to cloud '%s'", imagePath, cloudName)
+	// check local image file
+	finfo, err := os.Stat(imagePath)
+	if err != nil {
+		return errors.Wrapf(err, "Could not stat file '%s'", imagePath)
+	}
+	if finfo.IsDir() {
+		return fmt.Errorf("Path '%s' is a directory", imagePath)
+	}
+	if finfo.Size() == 0 {
+		return fmt.Errorf("Image '%s' has 0 bytes", imagePath)
+	}
+
+	// init cloud
+	provider, err := dbp.GetCloud(cloudName)
+	if err != nil {
+		return errors.Wrapf(err, "Could not retrieve cloud '%s'", cloudName)
+	}
+	client := provider.Client()
+	err = client.Init(provider.Auth)
+	if err != nil {
+		return errors.Wrapf(err, "Failed to connect to cloud provider '%s'(%s) API", cloudName, provider.Type.String())
+	}
+
+	// find image
+	images, err := client.GetImages()
+	if err != nil {
+		return errors.Wrap(err, errMsg)
+	}
+	for _, img := range images {
+		if img.Location == cloudLocation && img.Name == imageName {
+			return errors.Wrap(fmt.Errorf("Found an image with the same name"), errMsg)
+		}
+	}
+
+	// upload image
+	_, err = client.UploadLocalImage(imagePath, imageName, cloudLocation)
+	if err != nil {
+		return errors.Wrap(err, errMsg)
+	}
+
+	return nil
+}
+
+func deleteImageFromCloud(imageName string, cloudName string, cloudLocation string) error {
+	errMsg := fmt.Sprintf("Failed to delete image '%s' from cloud '%s'", imageName, cloudName)
+	// init cloud
+	provider, err := dbp.GetCloud(cloudName)
+	if err != nil {
+		return errors.Wrapf(err, "Could not retrieve cloud '%s'", cloudName)
+	}
+	client := provider.Client()
+	err = client.Init(provider.Auth)
+	if err != nil {
+		return errors.Wrapf(err, "Failed to connect to cloud provider '%s'(%s) API", cloudName, provider.Type.String())
+	}
+
+	// delete image
+	err = client.RemoveImage(imageName, cloudLocation)
+	if err != nil {
+		return errors.Wrap(err, errMsg)
+	}
+
+	return nil
 }
