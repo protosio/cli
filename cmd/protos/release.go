@@ -21,14 +21,32 @@ var cmdRelease *cli.Command = &cli.Command{
 	Usage: "Manage Protos releases",
 	Subcommands: []*cli.Command{
 		{
-			Name:  "ls",
-			Usage: "Lists the available Protosd releases",
+			Name:  "available",
+			Usage: "Shows the available Protosd releases",
 			Action: func(c *cli.Context) error {
-				releases, err := getProtosReleases()
+				releases, err := getProtosAvailableReleases()
 				if err != nil {
 					return err
 				}
-				printProtosReleases(releases)
+				printProtosAvailableReleases(releases)
+				return nil
+			},
+		},
+		{
+			Name:      "ls",
+			ArgsUsage: "<cloud name>",
+			Usage:     "Retrieves and lists the Protosd images available in a specific cloud provider",
+			Action: func(c *cli.Context) error {
+				cloudName := c.Args().Get(0)
+				if cloudName == "" {
+					cli.ShowSubcommandHelp(c)
+					os.Exit(1)
+				}
+
+				err := printProtosCloudImages(cloudName)
+				if err != nil {
+					return err
+				}
 				return nil
 			},
 		},
@@ -73,7 +91,7 @@ var cmdRelease *cli.Command = &cli.Command{
 // Releases methods
 //
 
-func printProtosReleases(releases release.Releases) {
+func printProtosAvailableReleases(releases release.Releases) {
 	w := new(tabwriter.Writer)
 	w.Init(os.Stdout, 0, 0, 2, ' ', 0)
 
@@ -87,7 +105,7 @@ func printProtosReleases(releases release.Releases) {
 	fmt.Fprint(w, "\n")
 }
 
-func getProtosReleases() (release.Releases, error) {
+func getProtosAvailableReleases() (release.Releases, error) {
 	var releases release.Releases
 	resp, err := http.Get(releasesURL)
 	if err != nil {
@@ -105,6 +123,42 @@ func getProtosReleases() (release.Releases, error) {
 	}
 
 	return releases, nil
+}
+
+func printProtosCloudImages(cloudName string) error {
+
+	// init cloud
+	provider, err := dbp.GetCloud(cloudName)
+	if err != nil {
+		return errors.Wrapf(err, "Could not retrieve cloud '%s'", cloudName)
+	}
+	client := provider.Client()
+	err = client.Init(provider.Auth)
+	if err != nil {
+		return errors.Wrapf(err, "Failed to connect to cloud provider '%s'(%s) API", cloudName, provider.Type.String())
+	}
+
+	images, err := client.GetProtosImages()
+	if err != nil {
+		return errors.Wrapf(err, "Failed to retrieve cloud images")
+	}
+
+	//
+	// do the printing
+	//
+	w := new(tabwriter.Writer)
+	w.Init(os.Stdout, 0, 0, 2, ' ', 0)
+
+	defer w.Flush()
+
+	fmt.Fprintf(w, " %s\t%s\t%s\t", "Version", "ID", "Location")
+	fmt.Fprintf(w, "\n %s\t%s\t%s\t", "-------", "--", "--------")
+	for _, img := range images {
+		fmt.Fprintf(w, "\n %s\t%s\t%s\t", img.Name, img.ID, img.Location)
+	}
+	fmt.Fprint(w, "\n")
+
+	return nil
 }
 
 func uploadLocalImageToCloud(imagePath string, imageName string, cloudName string, cloudLocation string) error {
@@ -127,7 +181,7 @@ func uploadLocalImageToCloud(imagePath string, imageName string, cloudName strin
 		return errors.Wrapf(err, "Could not retrieve cloud '%s'", cloudName)
 	}
 	client := provider.Client()
-	err = client.Init(provider.Auth, cloudLocation)
+	err = client.Init(provider.Auth)
 	if err != nil {
 		return errors.Wrapf(err, "Failed to connect to cloud provider '%s'(%s) API", cloudName, provider.Type.String())
 	}
@@ -141,7 +195,7 @@ func uploadLocalImageToCloud(imagePath string, imageName string, cloudName strin
 		return errors.Wrap(fmt.Errorf("Found an image with name '%s'", imageName), errMsg)
 	}
 
-	_, err = client.UploadLocalImage(imagePath, imageName)
+	_, err = client.UploadLocalImage(imagePath, imageName, cloudLocation)
 	if err != nil {
 		return errors.Wrap(err, errMsg)
 	}
