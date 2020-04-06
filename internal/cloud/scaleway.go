@@ -607,7 +607,7 @@ func (sw *scaleway) UploadLocalImage(imagePath string, imageName string, locatio
 	log.Info("Creating snapshot from volume")
 	snapshotResp, err := sw.instanceAPI.CreateSnapshot(&instance.CreateSnapshotRequest{
 		VolumeID: vol.ID,
-		Name:     protosImage + "-snapshot",
+		Name:     "protos-snapshot-" + imageName,
 		Zone:     scw.Zone(location),
 	})
 	if err != nil {
