@@ -6,6 +6,7 @@ import (
 	"os/signal"
 	"syscall"
 	"text/tabwriter"
+	"time"
 
 	"github.com/pkg/errors"
 	"github.com/protosio/cli/internal/cloud"
@@ -294,12 +295,15 @@ func deployInstance(instanceName string, cloudName string, cloudLocation string,
 		return cloud.InstanceInfo{}, errors.Wrapf(err, "Failed to save instance '%s'", instanceName)
 	}
 
+	// wait for port 22 to be open
 	err = cloud.WaitForPort(instanceInfo.PublicIP, "22", 20)
 	if err != nil {
 		return cloud.InstanceInfo{}, errors.Wrap(err, "Failed to deploy instance")
 	}
 
-	// wait for the instance to be up
+	// allow some time for Protosd to start up, or else the tunnel might fail
+	time.Sleep(5 * time.Second)
+
 	log.Infof("Creating SSH tunnel to instance '%s'", instanceName)
 	tunnel := ssh.NewTunnel(instanceInfo.PublicIP+":22", "root", key.SSHAuth(), "localhost:8080", log)
 	localPort, err := tunnel.Start()
@@ -319,6 +323,7 @@ func deployInstance(instanceName string, cloudName string, cloudLocation string,
 	}
 
 	// do the initialization
+	log.Infof("Initializing instance '%s'", instanceName)
 	protos := pclient.NewInitClient(fmt.Sprintf("127.0.0.1:%d", localPort), user.Username, user.Password, user.Domain)
 	err = protos.InitInstance()
 	if err != nil {
@@ -330,6 +335,7 @@ func deployInstance(instanceName string, cloudName string, cloudLocation string,
 	if err != nil {
 		return cloud.InstanceInfo{}, errors.Wrap(err, "Error while terminating the SSH tunnel")
 	}
+	log.Infof("Instance '%s' is ready", instanceName)
 
 	return instanceInfo, nil
 }
