@@ -306,6 +306,7 @@ func deployInstance(instanceName string, cloudName string, cloudLocation string,
 	if err != nil {
 		return cloud.InstanceInfo{}, errors.Wrap(err, "Error while creating the SSH tunnel")
 	}
+	log.Infof("Tunnel to '%s' ready", instanceName)
 
 	user, err := user.Get(envi)
 	if err != nil {
