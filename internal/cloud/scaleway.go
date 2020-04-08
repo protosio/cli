@@ -188,13 +188,14 @@ func (sw *scaleway) NewInstance(name string, imageID string, pubKey string, mach
 	volumeMap := make(map[string]*instance.VolumeTemplate)
 	log.Infof("Deploing VM using image '%s'", imageID)
 	ipreq := true
+	bootType := instance.BootTypeLocal
 	req := &instance.CreateServerRequest{
 		Name:              name,
 		Zone:              scw.Zone(location),
 		CommercialType:    machineType,
 		DynamicIPRequired: &ipreq,
 		EnableIPv6:        false,
-		BootType:          instance.BootTypeLocal,
+		BootType:          &bootType,
 		Image:             imageID,
 		Volumes:           volumeMap,
 	}
@@ -792,13 +793,14 @@ func (sw *scaleway) createImageUploadVM(imageID string, location string) (*insta
 	volumeMap["0"] = volumeTemplate
 
 	ipreq := true
+	bootType := instance.BootTypeLocal
 	req := &instance.CreateServerRequest{
 		Name:              "protos-image-uploader",
 		Zone:              scw.Zone(location),
 		CommercialType:    "DEV1-S",
 		DynamicIPRequired: &ipreq,
 		EnableIPv6:        false,
-		BootType:          instance.BootTypeLocal,
+		BootType:          &bootType,
 		Image:             imageID,
 		Volumes:           volumeMap,
 	}
