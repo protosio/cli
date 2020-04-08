@@ -2,19 +2,15 @@ package db
 
 import (
 	"os"
-	"os/user"
 
 	"github.com/asdine/storm"
 	"github.com/pkg/errors"
 	"github.com/protosio/cli/internal/cloud"
 )
 
-const (
-	// DefaultPath indicates the default path where the DB file is saved
-	DefaultPath = "/.protos/protos.db"
-)
+var dbi DB
 
-type dbstorm struct {
+type dbprotos struct {
 	s *storm.DB
 }
 
@@ -28,65 +24,60 @@ type DB interface {
 	DeleteInstance(name string) error
 	GetInstance(name string) (cloud.InstanceInfo, error)
 	GetAllInstances() ([]cloud.InstanceInfo, error)
+
+	// generalized
+	// Save writes a new value for a specific key in a bucket
+	Save(data interface{}) error
+	All(to interface{}) error
 	Close() error
 }
 
 // Init creates a new local database used by the Protos client
-func Init() (string, error) {
-	usr, _ := user.Current()
-	protosDir := usr.HomeDir + "/.protos"
-	protosDB := protosDir + "/protos.db"
-	_, err := os.Stat(protosDB)
-	if err == nil {
-		return protosDB, errors.Errorf("A file exists on path '%s'. Remove it and start the init process again", protosDB)
-	} else if !os.IsNotExist(err) {
-		return protosDB, errors.Wrapf(err, "Failed to stat path '%s'", protosDB)
-	}
+func initDB(protosDir string, protosDB string) (*storm.DB, error) {
+	dbPath := protosDir + protosDB
 
 	dirInfo, err := os.Stat(protosDir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			err = os.MkdirAll(protosDir, os.FileMode(0700))
 			if err != nil {
-				return protosDB, errors.Wrapf(err, "Failed to create '%s' directory", protosDir)
+				return nil, errors.Wrapf(err, "Failed to create '%s' directory", protosDir)
 			}
 		} else {
-			return protosDB, errors.Wrapf(err, "Failed to probe '%s' directory", protosDir)
+			return nil, errors.Wrapf(err, "Failed to probe '%s' directory", protosDir)
 		}
 	} else {
 		if !dirInfo.IsDir() {
-			return protosDB, errors.Errorf("Protos path '%s' is a file, and not a directory", protosDir)
+			return nil, errors.Errorf("Protos path '%s' is a file, and not a directory", protosDir)
 		}
 	}
 
-	return protosDB, New(protosDB)
-}
-
-// New create a new DB at the path specified
-func New(path string) error {
-	db, err := storm.Open(path)
-	if err != nil {
-		return err
-	}
-	defer db.Close()
-	return nil
-}
-
-// Open tries to open a client for the db on the provided path
-func Open(path string) (DB, error) {
-	if path == "" {
-		usr, _ := user.Current()
-		path = usr.HomeDir + DefaultPath
-	}
-	_, err := os.Stat(path)
-	if err != nil {
-		return nil, errors.Wrap(err, "Can't find database file. Please run init")
-	}
-	db := &dbstorm{}
-	dbg, err := storm.Open(path)
+	db, err := storm.Open(dbPath)
 	if err != nil {
 		return nil, err
 	}
+	return db, nil
+
+}
+
+// Open tries to open a client for the db on the provided path
+func Open(protosDir string, protosDB string) (DB, error) {
+	dbPath := protosDir + protosDB
+	db := &dbprotos{}
+	var dbg *storm.DB
+
+	_, err := os.Stat(dbPath)
+	if err == nil {
+		dbg, err = storm.Open(dbPath)
+		if err != nil {
+			return nil, err
+		}
+	} else if os.IsNotExist(err) {
+		dbg, err = initDB(protosDir, protosDB)
+	} else {
+		return db, errors.Wrapf(err, "Failed to stat path '%s'", dbPath)
+	}
+
 	db.s = dbg
 	return db, nil
 }
@@ -95,11 +86,31 @@ func Open(path string) (DB, error) {
 // db storm methods for implementing the DB interface
 //
 
-func (db *dbstorm) SaveCloud(cloud cloud.ProviderInfo) error {
+// Save writes a new value for a specific key in a bucket
+func (db *dbprotos) Save(data interface{}) error {
+	return db.s.Save(data)
+}
+
+// One retrieves one record from the database based on the field name
+func (db *dbprotos) One(fieldName string, value interface{}, to interface{}) error {
+	return db.s.One(fieldName, value, to)
+}
+
+// All retrieves all records for a specific type
+func (db *dbprotos) All(to interface{}) error {
+	return db.s.All(to)
+}
+
+// Delete removes a record of specific type
+func (db *dbprotos) Delete(data interface{}) error {
+	return db.s.DeleteStruct(data)
+}
+
+func (db *dbprotos) SaveCloud(cloud cloud.ProviderInfo) error {
 	return db.s.Save(&cloud)
 }
 
-func (db *dbstorm) DeleteCloud(name string) error {
+func (db *dbprotos) DeleteCloud(name string) error {
 	cp := cloud.ProviderInfo{}
 	err := db.s.One("Name", name, &cp)
 	if err != nil {
@@ -113,7 +124,7 @@ func (db *dbstorm) DeleteCloud(name string) error {
 	return nil
 }
 
-func (db *dbstorm) GetCloud(name string) (cloud.ProviderInfo, error) {
+func (db *dbprotos) GetCloud(name string) (cloud.ProviderInfo, error) {
 	cp := cloud.ProviderInfo{}
 	err := db.s.One("Name", name, &cp)
 	if err != nil {
@@ -122,7 +133,7 @@ func (db *dbstorm) GetCloud(name string) (cloud.ProviderInfo, error) {
 	return cp, nil
 }
 
-func (db *dbstorm) GetAllClouds() ([]cloud.ProviderInfo, error) {
+func (db *dbprotos) GetAllClouds() ([]cloud.ProviderInfo, error) {
 	cps := []cloud.ProviderInfo{}
 	err := db.s.All(&cps)
 	if err != nil {
@@ -131,11 +142,11 @@ func (db *dbstorm) GetAllClouds() ([]cloud.ProviderInfo, error) {
 	return cps, nil
 }
 
-func (db *dbstorm) SaveInstance(instance cloud.InstanceInfo) error {
+func (db *dbprotos) SaveInstance(instance cloud.InstanceInfo) error {
 	return db.s.Save(&instance)
 }
 
-func (db *dbstorm) DeleteInstance(name string) error {
+func (db *dbprotos) DeleteInstance(name string) error {
 	instance := cloud.InstanceInfo{}
 	err := db.s.One("Name", name, &instance)
 	if err != nil {
@@ -149,7 +160,7 @@ func (db *dbstorm) DeleteInstance(name string) error {
 	return nil
 }
 
-func (db *dbstorm) GetInstance(name string) (cloud.InstanceInfo, error) {
+func (db *dbprotos) GetInstance(name string) (cloud.InstanceInfo, error) {
 	instance := cloud.InstanceInfo{}
 	err := db.s.One("Name", name, &instance)
 	if err != nil {
@@ -158,7 +169,7 @@ func (db *dbstorm) GetInstance(name string) (cloud.InstanceInfo, error) {
 	return instance, nil
 }
 
-func (db *dbstorm) GetAllInstances() ([]cloud.InstanceInfo, error) {
+func (db *dbprotos) GetAllInstances() ([]cloud.InstanceInfo, error) {
 	instances := []cloud.InstanceInfo{}
 	err := db.s.All(&instances)
 	if err != nil {
@@ -167,6 +178,6 @@ func (db *dbstorm) GetAllInstances() ([]cloud.InstanceInfo, error) {
 	return instances, nil
 }
 
-func (db *dbstorm) Close() error {
+func (db *dbprotos) Close() error {
 	return db.s.Close()
 }

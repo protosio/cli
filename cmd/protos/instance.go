@@ -6,15 +6,19 @@ import (
 	"os/signal"
 	"syscall"
 	"text/tabwriter"
+	"time"
 
 	"github.com/pkg/errors"
 	"github.com/protosio/cli/internal/cloud"
 	"github.com/protosio/cli/internal/release"
 	ssh "github.com/protosio/cli/internal/ssh"
+	"github.com/protosio/cli/internal/user"
+	pclient "github.com/protosio/protos/pkg/client"
 	"github.com/urfave/cli/v2"
 )
 
 var machineType string
+var devImg string
 
 var cmdInstance *cli.Command = &cli.Command{
 	Name:  "instance",
@@ -51,6 +55,12 @@ var cmdInstance *cli.Command = &cli.Command{
 					Destination: &protosVersion,
 				},
 				&cli.StringFlag{
+					Name:        "devimg",
+					Usage:       "Use a dev image uploaded to your cloud accoun",
+					Required:    false,
+					Destination: &devImg,
+				},
+				&cli.StringFlag{
 					Name:        "type",
 					Usage:       "Specify cloud machine type `TYPE` to deploy. Get it from 'cloud info' subcommand",
 					Required:    true,
@@ -67,20 +77,22 @@ var cmdInstance *cli.Command = &cli.Command{
 				if err != nil {
 					return err
 				}
-				var release release.Release
-				if protosVersion == "" {
-					release, err = releases.GetLatest()
+				rls := release.Release{}
+				if devImg != "" {
+					rls.Version = devImg
+				} else if protosVersion != "" {
+					rls, err = releases.GetVersion(protosVersion)
 					if err != nil {
 						return err
 					}
 				} else {
-					release, err = releases.GetVersion(protosVersion)
+					rls, err = releases.GetLatest()
 					if err != nil {
 						return err
 					}
 				}
 
-				_, err = deployInstance(name, cloudName, cloudLocation, release, machineType)
+				_, err = deployInstance(name, cloudName, cloudLocation, rls, machineType)
 				return err
 			},
 		},
@@ -157,7 +169,7 @@ var cmdInstance *cli.Command = &cli.Command{
 //
 
 func listInstances() error {
-	instances, err := dbp.GetAllInstances()
+	instances, err := envi.DB.GetAllInstances()
 	if err != nil {
 		return err
 	}
@@ -179,7 +191,7 @@ func listInstances() error {
 func deployInstance(instanceName string, cloudName string, cloudLocation string, release release.Release, machineType string) (cloud.InstanceInfo, error) {
 
 	// init cloud
-	provider, err := dbp.GetCloud(cloudName)
+	provider, err := envi.DB.GetCloud(cloudName)
 	if err != nil {
 		return cloud.InstanceInfo{}, errors.Wrapf(err, "Could not retrieve cloud '%s'", cloudName)
 	}
@@ -246,7 +258,7 @@ func deployInstance(instanceName string, cloudName string, cloudLocation string,
 		return cloud.InstanceInfo{}, errors.Wrap(err, "Failed to get Protos instance info")
 	}
 	// save of the instance information
-	err = dbp.SaveInstance(instanceInfo)
+	err = envi.DB.SaveInstance(instanceInfo)
 	if err != nil {
 		return cloud.InstanceInfo{}, errors.Wrapf(err, "Failed to save instance '%s'", instanceName)
 	}
@@ -278,20 +290,62 @@ func deployInstance(instanceName string, cloudName string, cloudLocation string,
 	}
 	// final save of the instance information
 	instanceInfo.KeySeed = key.Seed()
-	err = dbp.SaveInstance(instanceInfo)
+	err = envi.DB.SaveInstance(instanceInfo)
 	if err != nil {
 		return cloud.InstanceInfo{}, errors.Wrapf(err, "Failed to save instance '%s'", instanceName)
 	}
+
+	// wait for port 22 to be open
+	err = cloud.WaitForPort(instanceInfo.PublicIP, "22", 20)
+	if err != nil {
+		return cloud.InstanceInfo{}, errors.Wrap(err, "Failed to deploy instance")
+	}
+
+	// allow some time for Protosd to start up, or else the tunnel might fail
+	time.Sleep(5 * time.Second)
+
+	log.Infof("Creating SSH tunnel to instance '%s'", instanceName)
+	tunnel := ssh.NewTunnel(instanceInfo.PublicIP+":22", "root", key.SSHAuth(), "localhost:8080", log)
+	localPort, err := tunnel.Start()
+	if err != nil {
+		return cloud.InstanceInfo{}, errors.Wrap(err, "Error while creating the SSH tunnel")
+	}
+
+	err = cloud.WaitForHTTP(fmt.Sprintf("http://127.0.0.1:%d/ui/", localPort), 20)
+	if err != nil {
+		return cloud.InstanceInfo{}, errors.Wrap(err, "Failed to deploy instance")
+	}
+	log.Infof("Tunnel to '%s' ready", instanceName)
+
+	user, err := user.Get(envi)
+	if err != nil {
+		return cloud.InstanceInfo{}, err
+	}
+
+	// do the initialization
+	log.Infof("Initializing instance '%s'", instanceName)
+	protos := pclient.NewInitClient(fmt.Sprintf("127.0.0.1:%d", localPort), user.Username, user.Password, user.Domain)
+	err = protos.InitInstance()
+	if err != nil {
+		return cloud.InstanceInfo{}, errors.Wrap(err, "Error while doing the instance initialization")
+	}
+
+	// close the SSH tunnel
+	err = tunnel.Close()
+	if err != nil {
+		return cloud.InstanceInfo{}, errors.Wrap(err, "Error while terminating the SSH tunnel")
+	}
+	log.Infof("Instance '%s' is ready", instanceName)
 
 	return instanceInfo, nil
 }
 
 func deleteInstance(name string) error {
-	instance, err := dbp.GetInstance(name)
+	instance, err := envi.DB.GetInstance(name)
 	if err != nil {
 		return errors.Wrapf(err, "Could not retrieve instance '%s'", name)
 	}
-	cloudInfo, err := dbp.GetCloud(instance.CloudName)
+	cloudInfo, err := envi.DB.GetCloud(instance.CloudName)
 	if err != nil {
 		return errors.Wrapf(err, "Could not retrieve cloud '%s'", name)
 	}
@@ -302,35 +356,35 @@ func deleteInstance(name string) error {
 	}
 
 	log.Infof("Stopping instance '%s' (%s)", instance.Name, instance.VMID)
-	err = client.StopInstance(instance.VMID, cloudLocation)
+	err = client.StopInstance(instance.VMID, instance.Location)
 	if err != nil {
 		return errors.Wrapf(err, "Could not stop instance '%s'", name)
 	}
-	vmInfo, err := client.GetInstanceInfo(instance.VMID, cloudLocation)
+	vmInfo, err := client.GetInstanceInfo(instance.VMID, instance.Location)
 	if err != nil {
 		return errors.Wrapf(err, "Failed to get details for instance '%s'", name)
 	}
 	log.Infof("Deleting instance '%s' (%s)", instance.Name, instance.VMID)
-	err = client.DeleteInstance(instance.VMID, cloudLocation)
+	err = client.DeleteInstance(instance.VMID, instance.Location)
 	if err != nil {
 		return errors.Wrapf(err, "Could not delete instance '%s'", name)
 	}
 	for _, vol := range vmInfo.Volumes {
 		log.Infof("Deleting volume '%s' (%s) for instance '%s'", vol.Name, vol.VolumeID, name)
-		err = client.DeleteVolume(vol.VolumeID, cloudLocation)
+		err = client.DeleteVolume(vol.VolumeID, instance.Location)
 		if err != nil {
 			log.Errorf("Failed to delete volume '%s': %s", vol.Name, err.Error())
 		}
 	}
-	return dbp.DeleteInstance(name)
+	return envi.DB.DeleteInstance(name)
 }
 
 func startInstance(name string) error {
-	instance, err := dbp.GetInstance(name)
+	instance, err := envi.DB.GetInstance(name)
 	if err != nil {
 		return errors.Wrapf(err, "Could not retrieve instance '%s'", name)
 	}
-	cloudInfo, err := dbp.GetCloud(instance.CloudName)
+	cloudInfo, err := envi.DB.GetCloud(instance.CloudName)
 	if err != nil {
 		return errors.Wrapf(err, "Could not retrieve cloud '%s'", name)
 	}
@@ -341,7 +395,7 @@ func startInstance(name string) error {
 	}
 
 	log.Infof("Starting instance '%s' (%s)", instance.Name, instance.VMID)
-	err = client.StartInstance(instance.VMID, cloudLocation)
+	err = client.StartInstance(instance.VMID, instance.Location)
 	if err != nil {
 		return errors.Wrapf(err, "Could not start instance '%s'", name)
 	}
@@ -349,11 +403,11 @@ func startInstance(name string) error {
 }
 
 func stopInstance(name string) error {
-	instance, err := dbp.GetInstance(name)
+	instance, err := envi.DB.GetInstance(name)
 	if err != nil {
 		return errors.Wrapf(err, "Could not retrieve instance '%s'", name)
 	}
-	cloudInfo, err := dbp.GetCloud(instance.CloudName)
+	cloudInfo, err := envi.DB.GetCloud(instance.CloudName)
 	if err != nil {
 		return errors.Wrapf(err, "Could not retrieve cloud '%s'", name)
 	}
@@ -364,7 +418,7 @@ func stopInstance(name string) error {
 	}
 
 	log.Infof("Stopping instance '%s' (%s)", instance.Name, instance.VMID)
-	err = client.StopInstance(instance.VMID, cloudLocation)
+	err = client.StopInstance(instance.VMID, instance.Location)
 	if err != nil {
 		return errors.Wrapf(err, "Could not stop instance '%s'", name)
 	}
@@ -372,7 +426,7 @@ func stopInstance(name string) error {
 }
 
 func tunnelInstance(name string) error {
-	instanceInfo, err := dbp.GetInstance(name)
+	instanceInfo, err := envi.DB.GetInstance(name)
 	if err != nil {
 		return errors.Wrapf(err, "Could not retrieve instance '%s'", name)
 	}
@@ -411,7 +465,7 @@ func tunnelInstance(name string) error {
 }
 
 func keyInstance(name string) error {
-	instanceInfo, err := dbp.GetInstance(name)
+	instanceInfo, err := envi.DB.GetInstance(name)
 	if err != nil {
 		return errors.Wrapf(err, "Could not retrieve instance '%s'", name)
 	}

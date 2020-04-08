@@ -71,7 +71,7 @@ var cmdCloud *cli.Command = &cli.Command{
 //
 
 func listCloudProviders() error {
-	clouds, err := dbp.GetAllClouds()
+	clouds, err := envi.DB.GetAllClouds()
 	if err != nil {
 		return err
 	}
@@ -123,7 +123,7 @@ func addCloudProvider(cloudName string) (cloud.Provider, error) {
 
 	// save the cloud provider in the db
 	cloudProviderInfo := client.GetInfo()
-	err = dbp.SaveCloud(cloudProviderInfo)
+	err = envi.DB.SaveCloud(cloudProviderInfo)
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to save cloud provider info")
 	}
@@ -132,11 +132,11 @@ func addCloudProvider(cloudName string) (cloud.Provider, error) {
 }
 
 func deleteCloudProvider(name string) error {
-	return dbp.DeleteCloud(name)
+	return envi.DB.DeleteCloud(name)
 }
 
 func infoCloudProvider(name string) error {
-	cloud, err := dbp.GetCloud(name)
+	cloud, err := envi.DB.GetCloud(name)
 	if err != nil {
 		return errors.Wrapf(err, "Could not retrieve cloud '%s'", name)
 	}

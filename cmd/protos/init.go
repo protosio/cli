@@ -8,8 +8,8 @@ import (
 	survey "github.com/AlecAivazis/survey/v2"
 	"github.com/pkg/errors"
 	"github.com/protosio/cli/internal/cloud"
-	"github.com/protosio/cli/internal/db"
 	ssh "github.com/protosio/cli/internal/ssh"
+	"github.com/protosio/cli/internal/user"
 	"github.com/urfave/cli/v2"
 )
 
@@ -18,15 +18,15 @@ var cmdInit *cli.Command = &cli.Command{
 	Usage: "Initializes Protos locally and deploys an instance in one of the supported clouds",
 	Subcommands: []*cli.Command{
 		{
-			Name:  "db",
-			Usage: "Initialize local database",
+			Name:  "minimal",
+			Usage: "Initialize local database and user details",
 			Action: func(c *cli.Context) error {
-				return protosDBInit()
+				return protosMinimalInit()
 			},
 		},
 		{
 			Name:  "full",
-			Usage: "Initialize a protos instance. Created local db, adds a cloud provider and a Protos instance.",
+			Usage: "Initialize a protos instance. Created local db, user, adds a cloud provider and a Protos instance.",
 			Action: func(c *cli.Context) error {
 				return protosFullInit()
 			},
@@ -34,24 +34,100 @@ var cmdInit *cli.Command = &cli.Command{
 	},
 }
 
-func protosDBInit() error {
-	// create Protos DB
-	dbPath, err := db.Init()
-	if err != nil {
-		return errors.Wrap(err, "Failed to initialize Protos DB")
+func protosUserinit() error {
+
+	usrInfo, err := user.Get(envi)
+	if err == nil {
+		return fmt.Errorf("User '%s' already initialized", usrInfo.Username)
 	}
-	dbp, err = db.Open(dbPath)
+
+	userNameQuestion := []*survey.Question{{
+		Name:     "username",
+		Prompt:   &survey.Input{Message: "A username to uniquely identify you.\nUSERNAME: "},
+		Validate: survey.Required,
+	}}
+	var username string
+	err = survey.Ask(userNameQuestion, &username)
 	if err != nil {
 		return err
 	}
-	log.Infof("Initialized DB at: '%s'", dbPath)
+
+	nameQuestion := []*survey.Question{{
+		Name:     "name",
+		Prompt:   &survey.Input{Message: "Your name. This field is not mandatory and if left blank, your username will be used instead.\nNAME: "},
+		Validate: survey.Required,
+	}}
+	var name string
+	err = survey.Ask(nameQuestion, &name)
+	if err != nil {
+		return err
+	}
+
+	password := ""
+	passwordconfirm := " "
+
+	for password != passwordconfirm {
+		passwordQuestion := []*survey.Question{{
+			Name:     "password",
+			Prompt:   &survey.Password{Message: "Password used to authenticate on the Protos instance and apps that you deploy on it.\nPASSWORD: "},
+			Validate: survey.Required,
+		}}
+		err = survey.Ask(passwordQuestion, &password)
+		if err != nil {
+			return err
+		}
+		passwordConfirmQuestion := []*survey.Question{{
+			Name:     "passwordconfirm",
+			Prompt:   &survey.Password{Message: "CONFIRM PASSWORD: "},
+			Validate: survey.Required,
+		}}
+		err = survey.Ask(passwordConfirmQuestion, &passwordconfirm)
+		if err != nil {
+			return err
+		}
+		if password != passwordconfirm {
+			envi.Log.Error("Passwords don't match")
+		}
+	}
+
+	domainQuestion := []*survey.Question{{
+		Name:     "name",
+		Prompt:   &survey.Input{Message: "Fill in a domain name that you would like to use.\nIMPORTANT NOTE: ideally you own the domain or it is available for registration. If not, the domain will only be able to be used internally.\nDOMAIN: "},
+		Validate: survey.Required,
+	}}
+	var domain string
+	err = survey.Ask(domainQuestion, &domain)
+	if err != nil {
+		return err
+	}
+
+	_, err = user.New(envi, username, name, domain, password)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func protosMinimalInit() error {
+	err := protosUserinit()
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
 func protosFullInit() error {
 
-	// create Protos DB
-	protosDBInit()
+	//
+	// add user
+	//
+
+	err := protosUserinit()
+	if err != nil {
+		return err
+	}
 
 	//
 	// add cloud provider
@@ -64,7 +140,10 @@ func protosFullInit() error {
 		Validate: survey.Required,
 	}}
 	var cloudName string
-	err := survey.Ask(cloudNameQuestion, &cloudName)
+	err = survey.Ask(cloudNameQuestion, &cloudName)
+	if err != nil {
+		return err
+	}
 
 	cloudProvider, err := addCloudProvider(cloudName)
 	if err != nil {

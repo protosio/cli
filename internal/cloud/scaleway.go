@@ -352,7 +352,7 @@ func (sw *scaleway) AddImage(url string, hash string, version string, location s
 	//
 
 	log.Infof("Waiting for SSH service to be reachable at '%s'", srv.PublicIP.Address.String()+":22")
-	err = waitForPort(srv.PublicIP.Address.String(), "22", 25)
+	err = WaitForPort(srv.PublicIP.Address.String(), "22", 25)
 	if err != nil {
 		return "", errors.Wrap(err, "Failed to add Protos image to Scaleway")
 	}
@@ -509,7 +509,7 @@ func (sw *scaleway) UploadLocalImage(imagePath string, imageName string, locatio
 	//
 
 	log.Infof("Waiting for SSH service to be reachable at '%s'", srv.PublicIP.Address.String()+":22")
-	err = waitForPort(srv.PublicIP.Address.String(), "22", 25)
+	err = WaitForPort(srv.PublicIP.Address.String(), "22", 25)
 	if err != nil {
 		return "", errors.Wrap(err, errMsg)
 	}
