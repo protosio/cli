@@ -16,8 +16,6 @@ github.com/Netflix/go-expect v0.0.0-20180615182759-c93bf25de8e8 h1:xzYJEypr/85nB
 github.com/Netflix/go-expect v0.0.0-20180615182759-c93bf25de8e8/go.mod h1:oX5x61PbNXchhh0oikYAH+4Pcfw5LKv21+Jnpr6r6Pc=
 github.com/Nvveen/Gotty v0.0.0-20120604004816-cd527374f1e5/go.mod h1:lmUJ/7eu/Q8D7ML55dXQrVaamCz2vxCfdQBasLZfHKk=
 github.com/Sereal/Sereal v0.0.0-20190618215532-0b8ac451a863/go.mod h1:D0JMgToj/WdxCgd30Kc1UcA9E+WdZoJqeVOuYW7iTBM=
-github.com/Sereal/Sereal v0.0.0-20191211210414-3a6c62eca003 h1:j55VCcR/2D8FqNgjjPbolZt2RQtjX6bv8OuqeQWqyW4=
-github.com/Sereal/Sereal v0.0.0-20191211210414-3a6c62eca003/go.mod h1:D0JMgToj/WdxCgd30Kc1UcA9E+WdZoJqeVOuYW7iTBM=
 github.com/Sereal/Sereal v0.0.0-20200326150110-2c0ed69a855f h1:7/Y3GoE6X9WKK6q5q1oJhs0Ryi3CoXWLBXNOuYMt5vM=
 github.com/Sereal/Sereal v0.0.0-20200326150110-2c0ed69a855f/go.mod h1:D0JMgToj/WdxCgd30Kc1UcA9E+WdZoJqeVOuYW7iTBM=
 github.com/StackExchange/wmi v0.0.0-20190523213315-cbe66965904d/go.mod h1:3eOhrUMpNV+6aFIbp5/iudMxNCF27Vw2OZgy4xEx0Fg=
