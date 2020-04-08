@@ -21,4 +21,3 @@ require (
 	google.golang.org/appengine v1.6.1 // indirect
 )
 
-replace github.com/protosio/protos => /Users/al3x/code/protos/code/backend
