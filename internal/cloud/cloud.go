@@ -22,6 +22,8 @@ const (
 	DigitalOcean = Type("digitalocean")
 	// Scaleway represents the Scaleway cloud provider
 	Scaleway = Type("scaleway")
+	// Address space for allocating networks
+	netSpace = "10.100.0.0/16"
 )
 
 // SupportedProviders returns a list of supported cloud providers
@@ -47,14 +49,16 @@ func (pi ProviderInfo) Client() Provider {
 
 // InstanceInfo holds information about a cloud instance
 type InstanceInfo struct {
-	VMID      string
-	Name      string `storm:"id"`
-	KeySeed   []byte
-	PublicIP  string
-	CloudType Type
-	CloudName string
-	Location  string
-	Volumes   []VolumeInfo
+	VMID          string
+	Name          string `storm:"id"`
+	KeySeed       []byte
+	PublicIP      string
+	CloudType     Type
+	CloudName     string
+	Location      string
+	Network       string
+	ProtosVersion string
+	Volumes       []VolumeInfo
 }
 
 // VolumeInfo holds information about a data volume
@@ -174,4 +178,32 @@ func WaitForHTTP(url string, maxTries int) error {
 			return fmt.Errorf("Failed to do HTTP req to '%s' after %d tries", url, maxTries)
 		}
 	}
+}
+
+// AllocateNetwork allocates an unused network for an instance
+func AllocateNetwork(userNetwork net.IPNet, instances []InstanceInfo) (net.IPNet, error) {
+	// create list of existing networks
+	usedNetworks := []net.IPNet{userNetwork}
+	for _, inst := range instances {
+		_, inet, err := net.ParseCIDR(inst.Network)
+		if err != nil {
+			panic(err)
+		}
+		usedNetworks = append(usedNetworks, *inet)
+	}
+
+	// figure out which is the first network that is not currently used
+	_, netspace, _ := net.ParseCIDR(netSpace)
+	for i := 0; i <= 255; i++ {
+		newNet := *netspace
+		newNet.IP[2] = byte(i)
+		newNet.Mask[2] = byte(255)
+		for _, usedNet := range usedNetworks {
+			if !newNet.Contains(usedNet.IP) {
+				return newNet, nil
+			}
+		}
+	}
+
+	return net.IPNet{}, fmt.Errorf("Failed to allocate network")
 }
