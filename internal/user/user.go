@@ -3,10 +3,14 @@ package user
 import (
 	"errors"
 	"fmt"
+	"net"
+	"os"
 
 	"cuelang.org/go/cue"
 	"cuelang.org/go/encoding/gocode/gocodec"
+	"github.com/protosio/cli/internal/cloud"
 	"github.com/protosio/cli/internal/env"
+	"github.com/protosio/cli/internal/ssh"
 )
 
 const config = `
@@ -21,8 +25,21 @@ UserInfo :: {
 UserInfo
 `
 
+const (
+	// Address space for allocating networks
+	netSpace    = "10.100.0.0/16"
+	userNetwork = "10.100.0.0/24"
+)
+
 var r cue.Runtime
 var codec = gocodec.New(&r, nil)
+
+// Device represents a user device (laptop, phone, etc)
+type Device struct {
+	Name    string
+	KeySeed []byte
+	Network string
+}
 
 // Info represents the local Protos user
 type Info struct {
@@ -31,6 +48,7 @@ type Info struct {
 	Name     string
 	Domain   string
 	Password string
+	Device   Device
 }
 
 // Save saves the user to db
@@ -71,11 +89,22 @@ func New(env *env.Env, username string, name string, domain string, password str
 	if err == nil {
 		return usrInfo, fmt.Errorf("User '%s' already initialized. Modify it using the 'user set' command", usrInfo.Username)
 	}
-	user := Info{env: env, Username: username, Name: name, Domain: domain, Password: password}
+	host, err := os.Hostname()
+	if err != nil {
+		return usrInfo, fmt.Errorf("Failed to add user. Could not retrieve hostname: %w", err)
+	}
+	key, err := ssh.GenerateKey()
+	if err != nil {
+		return usrInfo, fmt.Errorf("Failed to add user. Could not generate key: %w", err)
+	}
+	userDevice := Device{Name: host, KeySeed: key.Seed(), Network: userNetwork}
+
+	user := Info{env: env, Username: username, Name: name, Domain: domain, Password: password, Device: userDevice}
 	err = user.Validate()
 	if err != nil {
 		return user, fmt.Errorf("Failed to add user. Validation error: %v", err)
 	}
+
 	user.save()
 	return user, nil
 }
@@ -96,4 +125,36 @@ func Get(env *env.Env) (Info, error) {
 	usr := users[0]
 	usr.env = env
 	return usr, nil
+}
+
+// AllocateNetwork allocates an unused network for an instance
+func AllocateNetwork(instances []cloud.InstanceInfo) (net.IPNet, error) {
+	_, userNet, err := net.ParseCIDR(userNetwork)
+	if err != nil {
+		panic(err)
+	}
+	// create list of existing networks
+	usedNetworks := []net.IPNet{*userNet}
+	for _, inst := range instances {
+		_, inet, err := net.ParseCIDR(inst.Network)
+		if err != nil {
+			panic(err)
+		}
+		usedNetworks = append(usedNetworks, *inet)
+	}
+
+	// figure out which is the first network that is not currently used
+	_, netspace, _ := net.ParseCIDR(netSpace)
+	for i := 0; i <= 255; i++ {
+		newNet := *netspace
+		newNet.IP[2] = byte(i)
+		newNet.Mask[2] = byte(255)
+		for _, usedNet := range usedNetworks {
+			if !newNet.Contains(usedNet.IP) {
+				return newNet, nil
+			}
+		}
+	}
+
+	return net.IPNet{}, fmt.Errorf("Failed to allocate network")
 }
