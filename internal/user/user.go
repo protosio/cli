@@ -16,11 +16,18 @@ import (
 const config = `
 import "strings"
 
+dev :: {
+	Name: string & strings.MinRunes(1) & strings.MaxRunes(32)
+	KeySeed: bytes
+	Network: string
+}
+
 UserInfo :: {
     Username: string & strings.MinRunes(1) & strings.MaxRunes(32)
     Name: string & strings.MinRunes(1) & strings.MaxRunes(128)
 	Domain: string & strings.MinRunes(3) & strings.MaxRunes(128)
 	Password: string & strings.MinRunes(10) & strings.MaxRunes(128)
+	Device: dev
 }
 UserInfo
 `
