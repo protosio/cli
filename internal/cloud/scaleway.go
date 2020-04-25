@@ -319,7 +319,7 @@ func (sw *scaleway) AddImage(url string, hash string, version string, location s
 	if err != nil {
 		return "", errors.Wrap(err, "Failed to add Protos image to Scaleway")
 	}
-	pubKey := strings.TrimSuffix(key.Public(), "\n") + " root@protos.io"
+	pubKey := strings.TrimSuffix(key.AuthorizedKey(), "\n") + " root@protos.io"
 
 	sshKey, err := sw.accountAPI.CreateSSHKey(&account.CreateSSHKeyRequest{Name: uploadSSHkey, OrganizationID: sw.credentials.organisationID, PublicKey: pubKey})
 	if err != nil {
@@ -481,7 +481,7 @@ func (sw *scaleway) UploadLocalImage(imagePath string, imageName string, locatio
 	if err != nil {
 		return "", errors.Wrap(err, errMsg)
 	}
-	pubKey := strings.TrimSuffix(key.Public(), "\n") + " root@protos.io"
+	pubKey := strings.TrimSuffix(key.AuthorizedKey(), "\n") + " root@protos.io"
 
 	sshKey, err := sw.accountAPI.CreateSSHKey(&account.CreateSSHKeyRequest{Name: uploadSSHkey, OrganizationID: sw.credentials.organisationID, PublicKey: pubKey})
 	if err != nil {
