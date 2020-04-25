@@ -2,10 +2,11 @@ module github.com/protosio/cli
 
 go 1.14
 
+replace github.com/protosio/protos => ../backend
+
 require (
 	cuelang.org/go v0.0.15
 	github.com/AlecAivazis/survey/v2 v2.0.7
-	github.com/DataDog/zstd v1.4.5 // indirect
 	github.com/Masterminds/semver v1.5.0
 	github.com/Sereal/Sereal v0.0.0-20200326150110-2c0ed69a855f // indirect
 	github.com/asdine/storm v2.1.2+incompatible

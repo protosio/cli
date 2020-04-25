@@ -2,6 +2,8 @@ package ssh
 
 import (
 	"crypto/rand"
+	"fmt"
+	"io/ioutil"
 	"time"
 
 	"github.com/pkg/errors"
@@ -19,6 +21,22 @@ func GenerateKey() (Key, error) {
 		return key, errors.Wrap(err, "Failed to generate SSH key")
 	}
 	return key, nil
+}
+
+// NewAuthFromKeyFile takes a file path and returns an ssh authentication
+func NewAuthFromKeyFile(keyPath string) (ssh.AuthMethod, error) {
+
+	privKey, err := ioutil.ReadFile(keyPath)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to read file: %w", err)
+	}
+
+	signer, err := ssh.ParsePrivateKey(privKey)
+	if err != nil {
+		return nil, fmt.Errorf("Unable to parse private key: %w", err)
+	}
+
+	return ssh.PublicKeys(signer), nil
 }
 
 // NewKeyFromSeed takes an ed25519 key seed and return a Key
