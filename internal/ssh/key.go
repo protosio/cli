@@ -14,9 +14,8 @@ type Key struct {
 	public  ed25519.PublicKey
 }
 
-func (k Key) Public() string {
-	publicKey, _ := ssh.NewPublicKey(k.public)
-	return string(ssh.MarshalAuthorizedKey(publicKey))
+func (k Key) Public() []byte {
+	return k.public
 }
 
 func (k Key) Seed() []byte {
