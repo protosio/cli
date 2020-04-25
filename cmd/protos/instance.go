@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"fmt"
 	"os"
 	"os/signal"
@@ -14,6 +15,7 @@ import (
 	ssh "github.com/protosio/cli/internal/ssh"
 	"github.com/protosio/cli/internal/user"
 	pclient "github.com/protosio/protos/pkg/client"
+	"github.com/protosio/protos/pkg/types"
 	"github.com/urfave/cli/v2"
 )
 
@@ -189,6 +191,10 @@ func listInstances() error {
 }
 
 func deployInstance(instanceName string, cloudName string, cloudLocation string, release release.Release, machineType string) (cloud.InstanceInfo, error) {
+	usr, err := user.Get(envi)
+	if err != nil {
+		return cloud.InstanceInfo{}, err
+	}
 
 	// init cloud
 	provider, err := envi.DB.GetCloud(cloudName)
@@ -239,14 +245,14 @@ func deployInstance(instanceName string, cloudName string, cloudLocation string,
 
 	// create SSH key used for instance
 	log.Info("Generating SSH key for the new VM instance")
-	key, err := ssh.GenerateKey()
+	instanceSSHKey, err := ssh.GenerateKey()
 	if err != nil {
 		return cloud.InstanceInfo{}, errors.Wrap(err, "Failed to deploy Protos instance")
 	}
 
 	// deploy a protos instance
 	log.Infof("Deploying instance '%s' of type '%s', using Protos version '%s' (image id '%s')", instanceName, machineType, release.Version, imageID)
-	vmID, err := client.NewInstance(instanceName, imageID, key.Public(), machineType, cloudLocation)
+	vmID, err := client.NewInstance(instanceName, imageID, instanceSSHKey.AuthorizedKey(), machineType, cloudLocation)
 	if err != nil {
 		return cloud.InstanceInfo{}, errors.Wrap(err, "Failed to deploy Protos instance")
 	}
@@ -257,7 +263,21 @@ func deployInstance(instanceName string, cloudName string, cloudLocation string,
 	if err != nil {
 		return cloud.InstanceInfo{}, errors.Wrap(err, "Failed to get Protos instance info")
 	}
-	// save of the instance information
+
+	// allocate network
+	instances, err := envi.DB.GetAllInstances()
+	if err != nil {
+		return cloud.InstanceInfo{}, fmt.Errorf("Failed to allocate network for instance '%s': %w", instanceInfo.Name, err)
+	}
+	network, err := user.AllocateNetwork(instances)
+	if err != nil {
+		return cloud.InstanceInfo{}, fmt.Errorf("Failed to allocate network for instance '%s': %w", instanceInfo.Name, err)
+	}
+
+	// save instance information
+	instanceInfo.KeySeed = instanceSSHKey.Seed()
+	instanceInfo.ProtosVersion = release.Version
+	instanceInfo.Network = network.String()
 	err = envi.DB.SaveInstance(instanceInfo)
 	if err != nil {
 		return cloud.InstanceInfo{}, errors.Wrapf(err, "Failed to save instance '%s'", instanceName)
@@ -288,8 +308,7 @@ func deployInstance(instanceName string, cloudName string, cloudLocation string,
 	if err != nil {
 		return cloud.InstanceInfo{}, errors.Wrap(err, "Failed to get Protos instance info")
 	}
-	// final save of the instance information
-	instanceInfo.KeySeed = key.Seed()
+	// second save of the instance information
 	err = envi.DB.SaveInstance(instanceInfo)
 	if err != nil {
 		return cloud.InstanceInfo{}, errors.Wrapf(err, "Failed to save instance '%s'", instanceName)
@@ -305,29 +324,43 @@ func deployInstance(instanceName string, cloudName string, cloudLocation string,
 	time.Sleep(5 * time.Second)
 
 	log.Infof("Creating SSH tunnel to instance '%s'", instanceName)
-	tunnel := ssh.NewTunnel(instanceInfo.PublicIP+":22", "root", key.SSHAuth(), "localhost:8080", log)
+	tunnel := ssh.NewTunnel(instanceInfo.PublicIP+":22", "root", instanceSSHKey.SSHAuth(), "localhost:8080", log)
 	localPort, err := tunnel.Start()
 	if err != nil {
 		return cloud.InstanceInfo{}, errors.Wrap(err, "Error while creating the SSH tunnel")
 	}
 
+	// wait for the API to be up
 	err = cloud.WaitForHTTP(fmt.Sprintf("http://127.0.0.1:%d/ui/", localPort), 20)
 	if err != nil {
 		return cloud.InstanceInfo{}, errors.Wrap(err, "Failed to deploy instance")
 	}
 	log.Infof("Tunnel to '%s' ready", instanceName)
 
-	user, err := user.Get(envi)
-	if err != nil {
-		return cloud.InstanceInfo{}, err
-	}
-
 	// do the initialization
 	log.Infof("Initializing instance '%s'", instanceName)
-	protos := pclient.NewInitClient(fmt.Sprintf("127.0.0.1:%d", localPort), user.Username, user.Password, user.Domain)
-	err = protos.InitInstance()
+	protos := pclient.NewInitClient(fmt.Sprintf("127.0.0.1:%d", localPort), usr.Username, usr.Password)
+	userDeviceKey, err := ssh.NewKeyFromSeed(usr.Device.KeySeed)
+	if err != nil {
+		panic(err)
+	}
+	keyEncoded := base64.StdEncoding.EncodeToString(userDeviceKey.Public())
+	usrDev := types.UserDevice{
+		Name:      usr.Device.Name,
+		PublicKey: keyEncoded,
+		Network:   usr.Device.Network,
+	}
+	ip, pubKey, err := protos.InitInstance(usr.Name, instanceInfo.Network, usr.Domain, []types.UserDevice{usrDev})
 	if err != nil {
 		return cloud.InstanceInfo{}, errors.Wrap(err, "Error while doing the instance initialization")
+	}
+
+	// final save instance info
+	instanceInfo.InternalIP = ip.String()
+	instanceInfo.PublicKey = pubKey
+	err = envi.DB.SaveInstance(instanceInfo)
+	if err != nil {
+		return cloud.InstanceInfo{}, errors.Wrapf(err, "Failed to save instance '%s'", instanceName)
 	}
 
 	// close the SSH tunnel
