@@ -49,8 +49,10 @@ func (pi ProviderInfo) Client() Provider {
 type InstanceInfo struct {
 	VMID          string
 	Name          string `storm:"id"`
-	KeySeed       []byte
+	KeySeed       []byte // private SSH key stored only on the client
+	PublicKey     []byte // public key used for wireguard connection
 	PublicIP      string
+	InternalIP    string
 	CloudType     Type
 	CloudName     string
 	Location      string
