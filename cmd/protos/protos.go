@@ -91,8 +91,12 @@ func config(currentCmd string, logLevel string) {
 	}
 	log.SetLevel(level)
 
-	usr, _ := osuser.Current()
-	protosDir := usr.HomeDir + "/.protos"
+	homedir := os.Getenv("HOME")
+	if homedir == "" {
+		usr, _ := osuser.Current()
+		homedir = usr.HomeDir
+	}
+	protosDir := homedir + "/.protos"
 	protosDB := "/protos.db"
 
 	dbi, err := db.Open(protosDir, protosDB)
