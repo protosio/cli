@@ -1,9 +1,11 @@
 package main
 
 import (
+	"encoding/base64"
 	"fmt"
 	"os"
 
+	"github.com/protosio/cli/internal/ssh"
 	"github.com/protosio/cli/internal/user"
 	"github.com/urfave/cli/v2"
 )
@@ -65,8 +67,17 @@ func infoUser() error {
 	if err != nil {
 		return err
 	}
+
+	key, err := ssh.NewKeyFromSeed(user.Device.KeySeed)
+	if err != nil {
+		return err
+	}
+	encodedPrivateKey := base64.StdEncoding.EncodeToString(key.Seed())
 	fmt.Printf("Username: %s\n", user.Username)
 	fmt.Printf("Name: %s\n", user.Name)
 	fmt.Printf("Domain: %s\n", user.Domain)
+	fmt.Printf("Device name: %s\n", user.Device.Name)
+	fmt.Printf("Device private key: %s\n", encodedPrivateKey)
+	fmt.Printf("Device network: %s\n", user.Device.Network)
 	return nil
 }
