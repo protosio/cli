@@ -6,6 +6,7 @@ import (
 
 	"github.com/mikesmitty/edkey"
 	"golang.org/x/crypto/ssh"
+	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
 // Key is an SSH key
@@ -16,6 +17,12 @@ type Key struct {
 
 func (k Key) Public() []byte {
 	return k.public
+}
+
+func (k Key) PublicWG() wgtypes.Key {
+	var wgkey wgtypes.Key
+	copy(wgkey[:], k.Seed())
+	return wgkey.PublicKey()
 }
 
 func (k Key) Seed() []byte {
