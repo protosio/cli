@@ -34,6 +34,19 @@ var cmdInstance *cli.Command = &cli.Command{
 			},
 		},
 		{
+			Name:      "info",
+			ArgsUsage: "<name>",
+			Usage:     "Display information about an instance",
+			Action: func(c *cli.Context) error {
+				name := c.Args().Get(0)
+				if name == "" {
+					cli.ShowSubcommandHelp(c)
+					os.Exit(1)
+				}
+				return infoInstance(name)
+			},
+		},
+		{
 			Name:      "deploy",
 			ArgsUsage: "<name>",
 			Usage:     "Deploy a new Protos instance",
@@ -187,6 +200,26 @@ func listInstances() error {
 		fmt.Fprintf(w, "\n %s\t%s\t%s\t%s\t%s\t%s\t", instance.Name, instance.PublicIP, instance.CloudName, instance.VMID, instance.Location, "n/a")
 	}
 	fmt.Fprint(w, "\n")
+	return nil
+}
+
+func infoInstance(instanceName string) error {
+	instance, err := envi.DB.GetInstance(instanceName)
+	if err != nil {
+		return fmt.Errorf("Could not retrieve instance '%s': %w", instanceName, err)
+	}
+
+	encodedPublicKey := base64.StdEncoding.EncodeToString(instance.PublicKey)
+	fmt.Printf("Name: %s\n", instance.Name)
+	fmt.Printf("VM ID: %s\n", instance.VMID)
+	fmt.Printf("Public Key: %s\n", encodedPublicKey)
+	fmt.Printf("Public IP: %s\n", instance.PublicIP)
+	fmt.Printf("Internal IP: %s\n", instance.InternalIP)
+	fmt.Printf("Network: %s\n", instance.Network)
+	fmt.Printf("Cloud type: %s\n", instance.CloudType)
+	fmt.Printf("Cloud name: %s\n", instance.CloudName)
+	fmt.Printf("Location: %s\n", instance.Location)
+	fmt.Printf("Protosd version: %s\n", instance.ProtosVersion)
 	return nil
 }
 

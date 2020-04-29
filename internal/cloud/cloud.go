@@ -18,10 +18,12 @@ func (ct Type) String() string {
 }
 
 const (
-	// DigitalOcean represents the DigitalOcean cloud provider
+	// DigitalOcean cloud provider
 	DigitalOcean = Type("digitalocean")
-	// Scaleway represents the Scaleway cloud provider
+	// Scaleway cloud provider
 	Scaleway = Type("scaleway")
+	// Hyperkit is a MacOS hypervisor based on xhyve
+	Hyperkit = Type("hyperkit")
 )
 
 // SupportedProviders returns a list of supported cloud providers
