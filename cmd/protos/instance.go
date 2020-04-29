@@ -115,13 +115,19 @@ var cmdInstance *cli.Command = &cli.Command{
 			Name:      "delete",
 			ArgsUsage: "<name>",
 			Usage:     "Delete instance",
+			Flags: []cli.Flag{
+				&cli.BoolFlag{
+					Name:  "local",
+					Usage: "Deletes the instance from the db and ignores any cloud resources",
+				},
+			},
 			Action: func(c *cli.Context) error {
 				name := c.Args().Get(0)
 				if name == "" {
 					cli.ShowSubcommandHelp(c)
 					os.Exit(1)
 				}
-				return deleteInstance(name)
+				return deleteInstance(name, c.Bool("local"))
 			},
 		},
 		{
@@ -406,40 +412,44 @@ func deployInstance(instanceName string, cloudName string, cloudLocation string,
 	return instanceInfo, nil
 }
 
-func deleteInstance(name string) error {
+func deleteInstance(name string, localOnly bool) error {
 	instance, err := envi.DB.GetInstance(name)
 	if err != nil {
 		return errors.Wrapf(err, "Could not retrieve instance '%s'", name)
 	}
-	cloudInfo, err := envi.DB.GetCloud(instance.CloudName)
-	if err != nil {
-		return errors.Wrapf(err, "Could not retrieve cloud '%s'", name)
-	}
-	client := cloudInfo.Client()
-	err = client.Init(cloudInfo.Auth)
-	if err != nil {
-		return errors.Wrapf(err, "Could not init cloud '%s'", name)
-	}
 
-	log.Infof("Stopping instance '%s' (%s)", instance.Name, instance.VMID)
-	err = client.StopInstance(instance.VMID, instance.Location)
-	if err != nil {
-		return errors.Wrapf(err, "Could not stop instance '%s'", name)
-	}
-	vmInfo, err := client.GetInstanceInfo(instance.VMID, instance.Location)
-	if err != nil {
-		return errors.Wrapf(err, "Failed to get details for instance '%s'", name)
-	}
-	log.Infof("Deleting instance '%s' (%s)", instance.Name, instance.VMID)
-	err = client.DeleteInstance(instance.VMID, instance.Location)
-	if err != nil {
-		return errors.Wrapf(err, "Could not delete instance '%s'", name)
-	}
-	for _, vol := range vmInfo.Volumes {
-		log.Infof("Deleting volume '%s' (%s) for instance '%s'", vol.Name, vol.VolumeID, name)
-		err = client.DeleteVolume(vol.VolumeID, instance.Location)
+	// if local only, ignore any cloud resources
+	if !localOnly {
+		cloudInfo, err := envi.DB.GetCloud(instance.CloudName)
 		if err != nil {
-			log.Errorf("Failed to delete volume '%s': %s", vol.Name, err.Error())
+			return errors.Wrapf(err, "Could not retrieve cloud '%s'", name)
+		}
+		client := cloudInfo.Client()
+		err = client.Init(cloudInfo.Auth)
+		if err != nil {
+			return errors.Wrapf(err, "Could not init cloud '%s'", name)
+		}
+
+		log.Infof("Stopping instance '%s' (%s)", instance.Name, instance.VMID)
+		err = client.StopInstance(instance.VMID, instance.Location)
+		if err != nil {
+			return errors.Wrapf(err, "Could not stop instance '%s'", name)
+		}
+		vmInfo, err := client.GetInstanceInfo(instance.VMID, instance.Location)
+		if err != nil {
+			return errors.Wrapf(err, "Failed to get details for instance '%s'", name)
+		}
+		log.Infof("Deleting instance '%s' (%s)", instance.Name, instance.VMID)
+		err = client.DeleteInstance(instance.VMID, instance.Location)
+		if err != nil {
+			return errors.Wrapf(err, "Could not delete instance '%s'", name)
+		}
+		for _, vol := range vmInfo.Volumes {
+			log.Infof("Deleting volume '%s' (%s) for instance '%s'", vol.Name, vol.VolumeID, name)
+			err = client.DeleteVolume(vol.VolumeID, instance.Location)
+			if err != nil {
+				log.Errorf("Failed to delete volume '%s': %s", vol.Name, err.Error())
+			}
 		}
 	}
 	return envi.DB.DeleteInstance(name)
