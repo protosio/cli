@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/base64"
 	"fmt"
 	"net"
 	"os"
@@ -138,18 +137,18 @@ func devInit(instanceName string, keyFile string, ipString string) error {
 	if err != nil {
 		panic(err)
 	}
-	keyEncoded := base64.StdEncoding.EncodeToString(key.Public())
+
 	usrDev := types.UserDevice{
 		Name:      usr.Device.Name,
-		PublicKey: keyEncoded,
+		PublicKey: key.PublicWG().String(),
 		Network:   usr.Device.Network,
 	}
-	instanceIP, instanceKey, err := protos.InitInstance(user.Name, developmentNetwork.String(), user.Domain, []types.UserDevice{usrDev})
+	instanceIP, instancePublicKey, err := protos.InitInstance(user.Name, developmentNetwork.String(), user.Domain, []types.UserDevice{usrDev})
 	if err != nil {
 		return errors.Wrap(err, "Error while doing the instance initialization")
 	}
 	instanceInfo.InternalIP = instanceIP.String()
-	instanceInfo.PublicKey = instanceKey
+	instanceInfo.PublicKey = instancePublicKey
 	instanceInfo.Network = developmentNetwork.String()
 
 	err = envi.DB.SaveInstance(instanceInfo)
@@ -243,6 +242,7 @@ func devTunnel(instanceName string) error {
 	if err != nil {
 		return err
 	}
+	keepAliveInterval := 20 * time.Second
 	peers := []wgtypes.PeerConfig{}
 	for _, instance := range instances {
 		var pubkey wgtypes.Key
@@ -256,7 +256,7 @@ func devTunnel(instanceName string) error {
 		if instanceIP == nil {
 			return fmt.Errorf("Failed to parse IP for instance '%s'", instance.Name)
 		}
-		keepAliveInterval := 20 * time.Second
+
 		peerConf := wgtypes.PeerConfig{
 			PublicKey:                   pubkey,
 			PersistentKeepaliveInterval: &keepAliveInterval,
