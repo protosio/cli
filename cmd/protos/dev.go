@@ -143,6 +143,8 @@ func devInit(instanceName string, keyFile string, ipString string) error {
 		PublicKey: key.PublicWG().String(),
 		Network:   usr.Device.Network,
 	}
+
+	// Doing the instance initialization which returns the internal wireguard IP and the public key created using the wireguard library.
 	instanceIP, instancePublicKey, err := protos.InitInstance(user.Name, developmentNetwork.String(), user.Domain, []types.UserDevice{usrDev})
 	if err != nil {
 		return errors.Wrap(err, "Error while doing the instance initialization")

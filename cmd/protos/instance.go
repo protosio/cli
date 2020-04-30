@@ -218,7 +218,7 @@ func infoInstance(instanceName string) error {
 	encodedPublicKey := base64.StdEncoding.EncodeToString(instance.PublicKey)
 	fmt.Printf("Name: %s\n", instance.Name)
 	fmt.Printf("VM ID: %s\n", instance.VMID)
-	fmt.Printf("Public Key: %s\n", encodedPublicKey)
+	fmt.Printf("Public Key (wireguard): %s\n", encodedPublicKey)
 	fmt.Printf("Public IP: %s\n", instance.PublicIP)
 	fmt.Printf("Internal IP: %s\n", instance.InternalIP)
 	fmt.Printf("Network: %s\n", instance.Network)
