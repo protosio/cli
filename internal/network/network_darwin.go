@@ -13,8 +13,9 @@ import (
 )
 
 const (
-	wgRunPath = "/var/run/wireguard"
-	wgGoPath  = "/usr/local/bin/wireguard-go"
+	wgRunPath    = "/var/run/wireguard"
+	wgGoPath     = "/usr/local/bin/wireguard-go"
+	ifconfigPath = "/sbin/ifconfig"
 )
 
 //
@@ -49,9 +50,35 @@ func (l *linkTUN) Addrs() ([]Address, error) {
 	return []Address{}, nil
 }
 func (l *linkTUN) DelAddr(a Address) error {
+	var cmd *exec.Cmd
+
+	// use ifconfig to add address to interface. If address has 2 or more semi-colons, it is an IPv6 address
+	if strings.Count(a.String(), ":") >= 2 {
+		cmd = exec.Command(ifconfigPath, l.realInterface, "inet6", a.String(), "-alias")
+	} else {
+		cmd = exec.Command(ifconfigPath, l.realInterface, "inet", a.String(), a.IP.String(), "-alias")
+	}
+
+	err := cmd.Run()
+	if err != nil {
+		return fmt.Errorf("failed to add address to link '%s': %w", l.name, err)
+	}
 	return nil
 }
 func (l *linkTUN) AddAddr(a Address) error {
+	var cmd *exec.Cmd
+
+	// use ifconfig to add address to interface. If address has 2 or more semi-colons, it is an IPv6 address
+	if strings.Count(a.String(), ":") >= 2 {
+		cmd = exec.Command(ifconfigPath, l.realInterface, "inet6", a.String(), "alias")
+	} else {
+		cmd = exec.Command(ifconfigPath, l.realInterface, "inet", a.String(), a.IP.String(), "alias")
+	}
+
+	err := cmd.Run()
+	if err != nil {
+		return fmt.Errorf("failed to add address to link '%s': %w", l.name, err)
+	}
 	return nil
 }
 
