@@ -27,27 +27,73 @@ type linkTUN struct {
 	realInterface     string
 	interfaceNameFile string
 	interfaceSockFile string
+	iface             net.Interface
 }
 
 func (l *linkTUN) Interface() net.Interface {
-	return net.Interface{}
+	iface, err := net.InterfaceByName(l.realInterface)
+	if err != nil {
+		panic(err)
+	}
+	l.iface = *iface
+	return l.iface
 }
 func (l *linkTUN) Name() string {
 	return l.name
 }
 func (l *linkTUN) Index() int {
-	return 0
+	return l.iface.Index
 }
 
 func (l *linkTUN) IsUp() bool {
+	// refresh interface
+	iface, err := net.InterfaceByName(l.realInterface)
+	if err != nil {
+		panic(err)
+	}
+	l.iface = *iface
+	// use flags to figure out status
+	flags := l.iface.Flags.String()
+	if strings.Contains(flags, "up") {
+		return true
+	}
 	return false
 }
-func (l *linkTUN) SetUp(bool) error {
-	// the userspace implementation on MacOS is always up once it's created
+func (l *linkTUN) SetUp(status bool) error {
+	var cmd *exec.Cmd
+	if status {
+		cmd = exec.Command(ifconfigPath, l.realInterface, "up")
+	} else {
+		cmd = exec.Command(ifconfigPath, l.realInterface, "down")
+	}
+	err := cmd.Run()
+	if err != nil {
+		return fmt.Errorf("failed to set up link '%s': %w", l.name, err)
+	}
 	return nil
 }
 func (l *linkTUN) Addrs() ([]Address, error) {
-	return []Address{}, nil
+	addresses := []Address{}
+
+	iface, err := net.InterfaceByName(l.realInterface)
+	if err != nil {
+		return addresses, fmt.Errorf("failed to retrieve addresses for link '%s': %w", l.name, err)
+	}
+
+	addrs, err := iface.Addrs()
+	if err != nil {
+		return addresses, fmt.Errorf("failed to retrieve addresses for link '%s': %w", l.name, err)
+	}
+	for _, addr := range addrs {
+		ip, netw, err := net.ParseCIDR(addr.String())
+		if err != nil {
+			return addresses, fmt.Errorf("failed to retrieve addresses for link '%s': %w", l.name, err)
+		}
+		netw.IP = ip
+		addresses = append(addresses, Address{IPNet: *netw})
+	}
+
+	return addresses, nil
 }
 func (l *linkTUN) DelAddr(a Address) error {
 	var cmd *exec.Cmd
@@ -61,7 +107,7 @@ func (l *linkTUN) DelAddr(a Address) error {
 
 	err := cmd.Run()
 	if err != nil {
-		return fmt.Errorf("failed to add address to link '%s': %w", l.name, err)
+		return fmt.Errorf("failed to delete address from link '%s': %w", l.name, err)
 	}
 	return nil
 }
@@ -197,11 +243,16 @@ func (m *linkMngr) GetLink(name string) (Link, error) {
 	// read interface file and figure out the real interface
 	sockData, err := ioutil.ReadFile(interfaceFile)
 	if err != nil {
-		return &linkTUN{}, fmt.Errorf("failed to find link '%s': %w", name, err)
+		return &linkTUN{}, fmt.Errorf("failed to get link '%s': %w", name, err)
 	}
 	realInterface := strings.TrimSuffix(string(sockData), "\n")
 	if realInterface == "" {
-		return &linkTUN{}, fmt.Errorf("failed to find link '%s': '%s' contains invalid data", name, interfaceFile)
+		return &linkTUN{}, fmt.Errorf("failed to get link '%s': '%s' contains invalid data", name, interfaceFile)
+	}
+
+	iface, err := net.InterfaceByName(realInterface)
+	if err != nil {
+		return &linkTUN{}, fmt.Errorf("failed to get link '%s': %w", name, err)
 	}
 
 	return &linkTUN{
@@ -209,6 +260,7 @@ func (m *linkMngr) GetLink(name string) (Link, error) {
 		realInterface:     realInterface,
 		interfaceNameFile: interfaceFile,
 		interfaceSockFile: fmt.Sprintf("%s/%s.sock", wgRunPath, realInterface),
+		iface:             *iface,
 	}, nil
 }
 
