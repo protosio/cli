@@ -16,7 +16,13 @@ const (
 	wgRunPath    = "/var/run/wireguard"
 	wgGoPath     = "/usr/local/bin/wireguard-go"
 	ifconfigPath = "/sbin/ifconfig"
+	routePath    = "/sbin/route"
 )
+
+type LinkError struct {
+	LinkName string
+	E        error
+}
 
 //
 // link implements the Link interface
@@ -28,6 +34,7 @@ type linkTUN struct {
 	interfaceNameFile string
 	interfaceSockFile string
 	iface             net.Interface
+	mngr              *linkMngr
 }
 
 func (l *linkTUN) Interface() net.Interface {
@@ -128,17 +135,34 @@ func (l *linkTUN) AddAddr(a Address) error {
 	return nil
 }
 
-func (l *linkTUN) ConfigureWG(wgtypes.Config) error {
+func (l *linkTUN) ConfigureWG(c wgtypes.Config) error {
+	if err := l.mngr.wg.ConfigureDevice(l.iface.Name, c); err != nil {
+		return fmt.Errorf("failed to configure link '%s': %w", l.name, err)
+	}
 	return nil
 }
 func (l *linkTUN) WGConfig() (*wgtypes.Device, error) {
-	return &wgtypes.Device{}, nil
+	dev, err := l.mngr.wg.Device(l.iface.Name)
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve device for link '%s': %w", l.name, err)
+	}
+	return dev, nil
 }
 
-func (l *linkTUN) AddRoute(Route) error {
+func (l *linkTUN) AddRoute(r Route) error {
+	cmd := exec.Command(routePath, "-n", "add", "-net", r.Dest.String(), "-interface", l.realInterface)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to add route to link '%s': %s", l.name, string(output))
+	}
 	return nil
 }
-func (l *linkTUN) DelRoute(Route) error {
+func (l *linkTUN) DelRoute(r Route) error {
+	cmd := exec.Command(routePath, "-n", "delete", "-net", r.Dest.String(), "-interface", l.realInterface)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to add route to link '%s': %s", l.name, string(output))
+	}
 	return nil
 }
 
@@ -261,6 +285,7 @@ func (m *linkMngr) GetLink(name string) (Link, error) {
 		interfaceNameFile: interfaceFile,
 		interfaceSockFile: fmt.Sprintf("%s/%s.sock", wgRunPath, realInterface),
 		iface:             *iface,
+		mngr:              m,
 	}, nil
 }
 
