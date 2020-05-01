@@ -4,23 +4,16 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"os/signal"
-	"strconv"
-	"syscall"
 	"time"
 
 	"github.com/pkg/errors"
 	"github.com/protosio/cli/internal/cloud"
+	"github.com/protosio/cli/internal/network"
 	"github.com/protosio/cli/internal/ssh"
 	"github.com/protosio/cli/internal/user"
 	pclient "github.com/protosio/protos/pkg/client"
 	"github.com/protosio/protos/pkg/types"
 	"github.com/urfave/cli/v2"
-
-	"golang.zx2c4.com/wireguard/device"
-	"golang.zx2c4.com/wireguard/ipc"
-	"golang.zx2c4.com/wireguard/tun"
-	"golang.zx2c4.com/wireguard/wgctrl"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
@@ -54,7 +47,7 @@ var cmdDev *cli.Command = &cli.Command{
 			},
 		},
 		{
-			Name:      "tunnel",
+			Name:      "vpn",
 			ArgsUsage: "<instance>",
 			Usage:     "Tunnel to dev instance",
 			Action: func(c *cli.Context) error {
@@ -169,83 +162,40 @@ func devInit(instanceName string, keyFile string, ipString string) error {
 }
 
 func devTunnel(instanceName string) error {
-	interfaceName := "utun6"
 
-	tun, err := tun.CreateTUN(interfaceName, device.DefaultMTU)
+	usr, err := user.Get(envi)
 	if err != nil {
 		return err
 	}
 
-	logger := device.NewLogger(
-		device.LogLevelDebug,
-		fmt.Sprintf("(%s) ", interfaceName),
-	)
-
-	fileUAPI, err := func() (*os.File, error) {
-		uapiFdStr := os.Getenv("WG_UAPI_FD")
-		if uapiFdStr == "" {
-			return ipc.UAPIOpen(interfaceName)
-		}
-
-		// use supplied fd
-
-		fd, err := strconv.ParseUint(uapiFdStr, 10, 32)
-		if err != nil {
-			return nil, err
-		}
-
-		return os.NewFile(uintptr(fd), ""), nil
-	}()
+	manager, err := network.NewManager()
 	if err != nil {
 		return err
 	}
 
-	device := device.NewDevice(tun, logger)
-
-	logger.Info.Println("Device started")
-
-	errs := make(chan error)
-	term := make(chan os.Signal, 1)
-
-	uapi, err := ipc.UAPIListen(interfaceName, fileUAPI)
+	// create protos vpn interface and configure the address
+	lnk, err := manager.CreateLink("protos0")
 	if err != nil {
-		logger.Error.Println("Failed to listen on uapi socket:", err)
-		os.Exit(1)
+		return err
 	}
-
-	go func() {
-		for {
-			conn, err := uapi.Accept()
-			if err != nil {
-				errs <- err
-				return
-			}
-			go device.IpcHandle(conn)
-		}
-	}()
-
-	logger.Info.Println("UAPI listener started")
-
-	signal.Notify(term, syscall.SIGTERM)
-	signal.Notify(term, os.Interrupt)
-
-	// create wg controller
-	wg, err := wgctrl.New()
+	ip, netp, err := net.ParseCIDR(usr.Device.Network)
+	if err != nil {
+		return err
+	}
+	netp.IP = ip
+	err = lnk.AddAddr(network.Address{IPNet: *netp})
 	if err != nil {
 		return err
 	}
 
-	user, err := user.Get(envi)
-	if err != nil {
-		return err
-	}
-
+	// create wireguard peer configurations and route list
 	instances, err := envi.DB.GetAllInstances()
 	if err != nil {
 		return err
 	}
-	keepAliveInterval := 20 * time.Second
+	keepAliveInterval := 25 * time.Second
 	peers := []wgtypes.PeerConfig{}
+	routes := []network.Route{}
 	for _, instance := range instances {
 		var pubkey wgtypes.Key
 		copy(pubkey[:], instance.PublicKey)
@@ -258,6 +208,7 @@ func devTunnel(instanceName string) error {
 		if instanceIP == nil {
 			return fmt.Errorf("Failed to parse IP for instance '%s'", instance.Name)
 		}
+		routes = append(routes, network.Route{Dest: *instanceNetwork})
 
 		peerConf := wgtypes.PeerConfig{
 			PublicKey:                   pubkey,
@@ -268,30 +219,25 @@ func devTunnel(instanceName string) error {
 		peers = append(peers, peerConf)
 	}
 
+	// configure wireguard
 	var pkey wgtypes.Key
-	copy(pkey[:], user.Device.KeySeed)
+	copy(pkey[:], usr.Device.KeySeed)
 	wgcfg := wgtypes.Config{
 		PrivateKey: &pkey,
 		Peers:      peers,
 	}
-	err = wg.ConfigureDevice(interfaceName, wgcfg)
+	err = lnk.ConfigureWG(wgcfg)
 	if err != nil {
 		return err
 	}
 
-	// wait for tunnel to terminate
-	select {
-	case <-term:
-	case <-errs:
-	case <-device.Wait():
+	// add the routes towards instances
+	for _, route := range routes {
+		err = lnk.AddRoute(route)
+		if err != nil {
+			return err
+		}
 	}
-
-	// clean up
-
-	uapi.Close()
-	device.Close()
-
-	logger.Info.Println("Shutting down")
 
 	return nil
 }

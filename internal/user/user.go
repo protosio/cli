@@ -35,7 +35,7 @@ UserInfo
 const (
 	// Address space for allocating networks
 	netSpace    = "10.100.0.0/16"
-	userNetwork = "10.100.0.0/24"
+	userNetwork = "10.100.0.1/24"
 )
 
 var r cue.Runtime
