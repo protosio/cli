@@ -40,6 +40,7 @@ func main() {
 			cmdInstance,
 			cmdUser,
 			cmdDev,
+			cmdVPN,
 		},
 	}
 
