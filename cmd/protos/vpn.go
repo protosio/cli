@@ -66,6 +66,7 @@ func startVPN() error {
 	if err != nil {
 		return err
 	}
+	var masterInstaceIP net.IP
 	keepAliveInterval := 25 * time.Second
 	peers := []wgtypes.PeerConfig{}
 	routes := []network.Route{}
@@ -77,16 +78,22 @@ func startVPN() error {
 		if err != nil {
 			return fmt.Errorf("Failed to parse network for instance '%s': %w", instance.Name, err)
 		}
-		instanceIP := net.ParseIP(instance.PublicIP)
-		if instanceIP == nil {
-			return fmt.Errorf("Failed to parse IP for instance '%s'", instance.Name)
+		instancePublicIP := net.ParseIP(instance.PublicIP)
+		if instancePublicIP == nil {
+			return fmt.Errorf("Failed to parse public IP for instance '%s'", instance.Name)
 		}
 		routes = append(routes, network.Route{Dest: *instanceNetwork})
+
+		instanceInternalIP := net.ParseIP(instance.InternalIP)
+		if instancePublicIP == nil {
+			return fmt.Errorf("Failed to parse internal IP for instance '%s'", instance.Name)
+		}
+		masterInstaceIP = instanceInternalIP
 
 		peerConf := wgtypes.PeerConfig{
 			PublicKey:                   pubkey,
 			PersistentKeepaliveInterval: &keepAliveInterval,
-			Endpoint:                    &net.UDPAddr{IP: instanceIP, Port: 10999},
+			Endpoint:                    &net.UDPAddr{IP: instancePublicIP, Port: 10999},
 			AllowedIPs:                  []net.IPNet{*instanceNetwork},
 		}
 		peers = append(peers, peerConf)
@@ -112,21 +119,49 @@ func startVPN() error {
 		}
 	}
 
+	// add DNS server for domain
+	dns, err := network.NewDNS()
+	if err != nil {
+		return err
+	}
+
+	err = dns.AddDomainServer(usr.Domain, masterInstaceIP)
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
 func stopVPN() error {
+	usr, err := user.Get(envi)
+	if err != nil {
+		return err
+	}
+
 	manager, err := network.NewManager()
 	if err != nil {
 		return err
 	}
 
+	// remove VPN link
 	_, err = manager.GetLink(protosNetworkInterface)
 	if err != nil {
 		return err
 	}
 
 	err = manager.DelLink(protosNetworkInterface)
+	if err != nil {
+		return err
+	}
+
+	// remove DNS server for domain
+	dns, err := network.NewDNS()
+	if err != nil {
+		return err
+	}
+
+	err = dns.DelDomainServer(usr.Domain)
 	if err != nil {
 		return err
 	}
