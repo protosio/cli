@@ -99,7 +99,7 @@ func config(currentCmd string, logLevel string) {
 		homedir = usr.HomeDir
 	}
 	protosDir := homedir + "/.protos"
-	protosDB := "/protos.db"
+	protosDB := "protos.db"
 
 	dbi, err := db.Open(protosDir, protosDB)
 	if err != nil {

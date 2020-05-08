@@ -5,6 +5,7 @@ import (
 	"net"
 	"time"
 
+	"github.com/protosio/cli/internal/cloud"
 	"github.com/protosio/cli/internal/network"
 	"github.com/protosio/cli/internal/user"
 	"github.com/urfave/cli/v2"
@@ -62,7 +63,8 @@ func startVPN() error {
 	}
 
 	// create wireguard peer configurations and route list
-	instances, err := envi.DB.GetAllInstances()
+	var instances []cloud.InstanceInfo
+	err = envi.DB.GetSet(instanceDS, &instances)
 	if err != nil {
 		return err
 	}

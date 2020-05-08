@@ -1,183 +1,141 @@
 package db
 
 import (
-	"os"
+	"fmt"
 
-	"github.com/asdine/storm"
-	"github.com/pkg/errors"
-	"github.com/protosio/cli/internal/cloud"
+	"github.com/attic-labs/noms/go/datas"
+	"github.com/attic-labs/noms/go/marshal"
+	"github.com/attic-labs/noms/go/nbs"
+	"github.com/attic-labs/noms/go/types"
+	"github.com/attic-labs/noms/go/util/clienttest"
 )
-
-var dbi DB
-
-type dbprotos struct {
-	s *storm.DB
-}
 
 // DB represents a DB client instance, used to interract with the database
 type DB interface {
-	SaveCloud(cloud cloud.ProviderInfo) error
-	DeleteCloud(name string) error
-	GetCloud(name string) (cloud.ProviderInfo, error)
-	GetAllClouds() ([]cloud.ProviderInfo, error)
-	SaveInstance(instance cloud.InstanceInfo) error
-	DeleteInstance(name string) error
-	GetInstance(name string) (cloud.InstanceInfo, error)
-	GetAllInstances() ([]cloud.InstanceInfo, error)
-
-	// generalized
-	// Save writes a new value for a specific key in a bucket
-	Save(data interface{}) error
-	All(to interface{}) error
+	SaveStruct(dataset string, data interface{}) error
+	GetStruct(dataset string, to interface{}) error
+	GetSet(dataset string, to interface{}) error
+	InsertInSet(dataset string, data interface{}) error
+	RemoveFromSet(dataset string, data interface{}) error
 	Close() error
 }
 
-// Init creates a new local database used by the Protos client
-func initDB(protosDir string, protosDB string) (*storm.DB, error) {
-	dbPath := protosDir + protosDB
-
-	dirInfo, err := os.Stat(protosDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			err = os.MkdirAll(protosDir, os.FileMode(0700))
-			if err != nil {
-				return nil, errors.Wrapf(err, "Failed to create '%s' directory", protosDir)
-			}
-		} else {
-			return nil, errors.Wrapf(err, "Failed to probe '%s' directory", protosDir)
-		}
-	} else {
-		if !dirInfo.IsDir() {
-			return nil, errors.Errorf("Protos path '%s' is a file, and not a directory", protosDir)
-		}
-	}
-
-	db, err := storm.Open(dbPath)
-	if err != nil {
-		return nil, err
-	}
-	return db, nil
-
-}
-
-// Open tries to open a client for the db on the provided path
+// Open opens a noms database on the provided path
 func Open(protosDir string, protosDB string) (DB, error) {
-	dbPath := protosDir + protosDB
-	db := &dbprotos{}
-	var dbg *storm.DB
-
-	_, err := os.Stat(dbPath)
-	if err == nil {
-		dbg, err = storm.Open(dbPath)
-		if err != nil {
-			return nil, err
-		}
-	} else if os.IsNotExist(err) {
-		dbg, err = initDB(protosDir, protosDB)
-	} else {
-		return db, errors.Wrapf(err, "Failed to stat path '%s'", dbPath)
-	}
-
-	db.s = dbg
-	return db, nil
+	dir := fmt.Sprintf("%s/%s", protosDir, protosDB)
+	db := datas.NewDatabase(nbs.NewLocalStore(dir, clienttest.DefaultMemTableSize))
+	return &dbNoms{dbn: db}, nil
 }
 
 //
 // db storm methods for implementing the DB interface
 //
 
-// Save writes a new value for a specific key in a bucket
-func (db *dbprotos) Save(data interface{}) error {
-	return db.s.Save(data)
+type dbNoms struct {
+	uri string
+	dbn datas.Database
 }
 
-// One retrieves one record from the database based on the field name
-func (db *dbprotos) One(fieldName string, value interface{}, to interface{}) error {
-	return db.s.One(fieldName, value, to)
+func (db *dbNoms) Close() error {
+	return db.dbn.Close()
 }
 
-// All retrieves all records for a specific type
-func (db *dbprotos) All(to interface{}) error {
-	return db.s.All(to)
-}
+// SaveStruct writes a new value for a given struct
+func (db *dbNoms) SaveStruct(dataset string, data interface{}) error {
 
-// Delete removes a record of specific type
-func (db *dbprotos) Delete(data interface{}) error {
-	return db.s.DeleteStruct(data)
-}
+	ds := db.dbn.GetDataset(dataset)
 
-func (db *dbprotos) SaveCloud(cloud cloud.ProviderInfo) error {
-	return db.s.Save(&cloud)
-}
-
-func (db *dbprotos) DeleteCloud(name string) error {
-	cp := cloud.ProviderInfo{}
-	err := db.s.One("Name", name, &cp)
+	marshaled, err := marshal.Marshal(db.dbn, data)
 	if err != nil {
-		return err
+		return fmt.Errorf("Failed to marshal db data: %w", err)
 	}
 
-	err = db.s.Delete("ProviderInfo", name)
+	_, err = db.dbn.CommitValue(ds, marshaled)
 	if err != nil {
-		return err
+		return fmt.Errorf("Error committing: %w", err)
 	}
 	return nil
 }
 
-func (db *dbprotos) GetCloud(name string) (cloud.ProviderInfo, error) {
-	cp := cloud.ProviderInfo{}
-	err := db.s.One("Name", name, &cp)
-	if err != nil {
-		return cp, err
-	}
-	return cp, nil
-}
-
-func (db *dbprotos) GetAllClouds() ([]cloud.ProviderInfo, error) {
-	cps := []cloud.ProviderInfo{}
-	err := db.s.All(&cps)
-	if err != nil {
-		return cps, err
-	}
-	return cps, nil
-}
-
-func (db *dbprotos) SaveInstance(instance cloud.InstanceInfo) error {
-	return db.s.Save(&instance)
-}
-
-func (db *dbprotos) DeleteInstance(name string) error {
-	instance := cloud.InstanceInfo{}
-	err := db.s.One("Name", name, &instance)
-	if err != nil {
-		return err
+// GetStruct retrieves a struct from a dataset
+func (db *dbNoms) GetStruct(dataset string, to interface{}) error {
+	ds := db.dbn.GetDataset(dataset)
+	hv, ok := ds.MaybeHeadValue()
+	if !ok {
+		return fmt.Errorf("No record found")
 	}
 
-	err = db.s.Delete("InstanceInfo", name)
+	err := marshal.Unmarshal(hv.Value(), to)
 	if err != nil {
-		return err
+		return fmt.Errorf("Failed to unmarshall: %w", err)
 	}
 	return nil
 }
 
-func (db *dbprotos) GetInstance(name string) (cloud.InstanceInfo, error) {
-	instance := cloud.InstanceInfo{}
-	err := db.s.One("Name", name, &instance)
-	if err != nil {
-		return instance, err
+// GetSet retrieves all records in a set
+func (db *dbNoms) GetSet(dataset string, to interface{}) error {
+	ds := db.dbn.GetDataset(dataset)
+
+	var set types.Set
+	hv, ok := ds.MaybeHeadValue()
+	if ok {
+		set = hv.(types.Set)
+	} else {
+		set = types.NewSet(ds.Database())
 	}
-	return instance, nil
+
+	err := marshal.Unmarshal(set.Value(), to)
+	if err != nil {
+		return fmt.Errorf("Failed to unmarshall: %w", err)
+	}
+
+	return nil
 }
 
-func (db *dbprotos) GetAllInstances() ([]cloud.InstanceInfo, error) {
-	instances := []cloud.InstanceInfo{}
-	err := db.s.All(&instances)
-	if err != nil {
-		return instances, err
+// InsertInSet inserts an element in a set, or updates an existing one
+func (db *dbNoms) InsertInSet(dataset string, data interface{}) error {
+	ds := db.dbn.GetDataset(dataset)
+
+	var set types.Set
+	hv, ok := ds.MaybeHeadValue()
+	if ok {
+		set = hv.(types.Set)
+	} else {
+		set = types.NewSet(ds.Database())
 	}
-	return instances, nil
+
+	marshaled, err := marshal.Marshal(db.dbn, data)
+	if err != nil {
+		return fmt.Errorf("Failed to marshal db data: %w", err)
+	}
+
+	_, err = db.dbn.CommitValue(ds, set.Edit().Insert(marshaled).Set())
+	if err != nil {
+		return fmt.Errorf("Error committing: %w", err)
+	}
+	return nil
 }
 
-func (db *dbprotos) Close() error {
-	return db.s.Close()
+// RemoveFromSet removes an element from a set
+func (db *dbNoms) RemoveFromSet(dataset string, data interface{}) error {
+	ds := db.dbn.GetDataset(dataset)
+
+	var set types.Set
+	hv, ok := ds.MaybeHeadValue()
+	if ok {
+		set = hv.(types.Set)
+	} else {
+		set = types.NewSet(ds.Database())
+	}
+
+	marshaled, err := marshal.Marshal(db.dbn, data)
+	if err != nil {
+		return fmt.Errorf("Failed to marshal db data: %w", err)
+	}
+
+	_, err = db.dbn.CommitValue(ds, set.Edit().Remove(marshaled).Set())
+	if err != nil {
+		return fmt.Errorf("Error committing: %w", err)
+	}
+	return nil
 }

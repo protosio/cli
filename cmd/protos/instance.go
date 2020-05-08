@@ -19,6 +19,10 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
+const (
+	instanceDS = "instance"
+)
+
 var machineType string
 var devImg string
 
@@ -185,12 +189,27 @@ var cmdInstance *cli.Command = &cli.Command{
 	},
 }
 
+func getInstance(name string) (cloud.InstanceInfo, error) {
+	instances := []cloud.InstanceInfo{}
+	err := envi.DB.GetSet(instanceDS, &instances)
+	if err != nil {
+		return cloud.InstanceInfo{}, err
+	}
+	for _, instance := range instances {
+		if instance.Name == name {
+			return instance, nil
+		}
+	}
+	return cloud.InstanceInfo{}, fmt.Errorf("Could not find instance '%s'", name)
+}
+
 //
 // Instance methods
 //
 
 func listInstances() error {
-	instances, err := envi.DB.GetAllInstances()
+	var instances []cloud.InstanceInfo
+	err := envi.DB.GetSet(instanceDS, &instances)
 	if err != nil {
 		return err
 	}
@@ -210,7 +229,7 @@ func listInstances() error {
 }
 
 func infoInstance(instanceName string) error {
-	instance, err := envi.DB.GetInstance(instanceName)
+	instance, err := getInstance(instanceName)
 	if err != nil {
 		return fmt.Errorf("Could not retrieve instance '%s': %w", instanceName, err)
 	}
@@ -236,7 +255,7 @@ func deployInstance(instanceName string, cloudName string, cloudLocation string,
 	}
 
 	// init cloud
-	provider, err := envi.DB.GetCloud(cloudName)
+	provider, err := getCloudProvider(cloudName)
 	if err != nil {
 		return cloud.InstanceInfo{}, errors.Wrapf(err, "Could not retrieve cloud '%s'", cloudName)
 	}
@@ -304,7 +323,8 @@ func deployInstance(instanceName string, cloudName string, cloudLocation string,
 	}
 
 	// allocate network
-	instances, err := envi.DB.GetAllInstances()
+	var instances []cloud.InstanceInfo
+	err = envi.DB.GetSet(instanceDS, &instances)
 	if err != nil {
 		return cloud.InstanceInfo{}, fmt.Errorf("Failed to allocate network for instance '%s': %w", instanceInfo.Name, err)
 	}
@@ -317,7 +337,7 @@ func deployInstance(instanceName string, cloudName string, cloudLocation string,
 	instanceInfo.KeySeed = instanceSSHKey.Seed()
 	instanceInfo.ProtosVersion = release.Version
 	instanceInfo.Network = network.String()
-	err = envi.DB.SaveInstance(instanceInfo)
+	err = envi.DB.InsertInSet(instanceDS, instanceInfo)
 	if err != nil {
 		return cloud.InstanceInfo{}, errors.Wrapf(err, "Failed to save instance '%s'", instanceName)
 	}
@@ -348,7 +368,7 @@ func deployInstance(instanceName string, cloudName string, cloudLocation string,
 		return cloud.InstanceInfo{}, errors.Wrap(err, "Failed to get Protos instance info")
 	}
 	// second save of the instance information
-	err = envi.DB.SaveInstance(instanceInfo)
+	err = envi.DB.InsertInSet(instanceDS, instanceInfo)
 	if err != nil {
 		return cloud.InstanceInfo{}, errors.Wrapf(err, "Failed to save instance '%s'", instanceName)
 	}
@@ -397,7 +417,7 @@ func deployInstance(instanceName string, cloudName string, cloudLocation string,
 	// final save instance info
 	instanceInfo.InternalIP = ip.String()
 	instanceInfo.PublicKey = pubKey
-	err = envi.DB.SaveInstance(instanceInfo)
+	err = envi.DB.InsertInSet(instanceDS, instanceInfo)
 	if err != nil {
 		return cloud.InstanceInfo{}, errors.Wrapf(err, "Failed to save instance '%s'", instanceName)
 	}
@@ -413,14 +433,14 @@ func deployInstance(instanceName string, cloudName string, cloudLocation string,
 }
 
 func deleteInstance(name string, localOnly bool) error {
-	instance, err := envi.DB.GetInstance(name)
+	instance, err := getInstance(name)
 	if err != nil {
 		return errors.Wrapf(err, "Could not retrieve instance '%s'", name)
 	}
 
 	// if local only, ignore any cloud resources
 	if !localOnly {
-		cloudInfo, err := envi.DB.GetCloud(instance.CloudName)
+		cloudInfo, err := getCloudProvider(instance.CloudName)
 		if err != nil {
 			return errors.Wrapf(err, "Could not retrieve cloud '%s'", name)
 		}
@@ -452,15 +472,15 @@ func deleteInstance(name string, localOnly bool) error {
 			}
 		}
 	}
-	return envi.DB.DeleteInstance(name)
+	return envi.DB.RemoveFromSet(instanceDS, instance)
 }
 
 func startInstance(name string) error {
-	instance, err := envi.DB.GetInstance(name)
+	instance, err := getInstance(name)
 	if err != nil {
 		return errors.Wrapf(err, "Could not retrieve instance '%s'", name)
 	}
-	cloudInfo, err := envi.DB.GetCloud(instance.CloudName)
+	cloudInfo, err := getCloudProvider(instance.CloudName)
 	if err != nil {
 		return errors.Wrapf(err, "Could not retrieve cloud '%s'", name)
 	}
@@ -479,11 +499,11 @@ func startInstance(name string) error {
 }
 
 func stopInstance(name string) error {
-	instance, err := envi.DB.GetInstance(name)
+	instance, err := getInstance(name)
 	if err != nil {
 		return errors.Wrapf(err, "Could not retrieve instance '%s'", name)
 	}
-	cloudInfo, err := envi.DB.GetCloud(instance.CloudName)
+	cloudInfo, err := getCloudProvider(instance.CloudName)
 	if err != nil {
 		return errors.Wrapf(err, "Could not retrieve cloud '%s'", name)
 	}
@@ -502,7 +522,7 @@ func stopInstance(name string) error {
 }
 
 func tunnelInstance(name string) error {
-	instanceInfo, err := envi.DB.GetInstance(name)
+	instanceInfo, err := getInstance(name)
 	if err != nil {
 		return errors.Wrapf(err, "Could not retrieve instance '%s'", name)
 	}
@@ -541,7 +561,7 @@ func tunnelInstance(name string) error {
 }
 
 func keyInstance(name string) error {
-	instanceInfo, err := envi.DB.GetInstance(name)
+	instanceInfo, err := getInstance(name)
 	if err != nil {
 		return errors.Wrapf(err, "Could not retrieve instance '%s'", name)
 	}

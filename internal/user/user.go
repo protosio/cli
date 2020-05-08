@@ -1,7 +1,6 @@
 package user
 
 import (
-	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -13,6 +12,7 @@ import (
 	"github.com/protosio/cli/internal/ssh"
 )
 
+const adminDS = "admin"
 const config = `
 import "strings"
 
@@ -41,6 +41,8 @@ const (
 var r cue.Runtime
 var codec = gocodec.New(&r, nil)
 
+// var envi *env.Env
+
 // Device represents a user device (laptop, phone, etc)
 type Device struct {
 	Name    string
@@ -50,8 +52,8 @@ type Device struct {
 
 // Info represents the local Protos user
 type Info struct {
-	env      *env.Env
-	Username string `storm:"id"`
+	env      *env.Env `noms:"-"`
+	Username string
 	Name     string
 	Domain   string
 	Password string
@@ -60,7 +62,7 @@ type Info struct {
 
 // Save saves the user to db
 func (ui Info) save() {
-	err := ui.env.DB.Save(&ui)
+	err := ui.env.DB.SaveStruct(adminDS, ui)
 	if err != nil {
 		panic(err)
 	}
@@ -91,8 +93,8 @@ func (ui Info) Validate() error {
 //
 
 // New creates and returns a new user. Also validates the data
-func New(env *env.Env, username string, name string, domain string, password string) (Info, error) {
-	usrInfo, err := Get(env)
+func New(envp *env.Env, username string, name string, domain string, password string) (Info, error) {
+	usrInfo, err := Get(envp)
 	if err == nil {
 		return usrInfo, fmt.Errorf("User '%s' already initialized. Modify it using the 'user set' command", usrInfo.Username)
 	}
@@ -106,7 +108,7 @@ func New(env *env.Env, username string, name string, domain string, password str
 	}
 	userDevice := Device{Name: host, KeySeed: key.Seed(), Network: userNetwork}
 
-	user := Info{env: env, Username: username, Name: name, Domain: domain, Password: password, Device: userDevice}
+	user := Info{env: envp, Username: username, Name: name, Domain: domain, Password: password, Device: userDevice}
 	err = user.Validate()
 	if err != nil {
 		return user, fmt.Errorf("Failed to add user. Validation error: %v", err)
@@ -118,18 +120,12 @@ func New(env *env.Env, username string, name string, domain string, password str
 
 // Get returns information about the local user
 func Get(env *env.Env) (Info, error) {
-	users := []Info{}
-	err := env.DB.All(&users)
+	usr := Info{}
+	err := env.DB.GetStruct(adminDS, &usr)
 	if err != nil {
-		panic(err)
-	}
-	if len(users) < 1 {
-		return Info{}, errors.New("There is no user info")
-	} else if len(users) > 1 {
-		panic("Found more than one user, please delete DB and re-run init")
+		return usr, err
 	}
 
-	usr := users[0]
 	usr.env = env
 	return usr, nil
 }

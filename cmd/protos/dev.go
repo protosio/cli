@@ -78,7 +78,8 @@ func devInit(instanceName string, keyFile string, ipString string) error {
 	}
 
 	// allocate network for dev instance
-	instances, err := envi.DB.GetAllInstances()
+	var instances []cloud.InstanceInfo
+	err = envi.DB.GetSet(instanceDS, &instances)
 	if err != nil {
 		return fmt.Errorf("Failed to allocate network for instance '%s': %w", "dev", err)
 	}
@@ -129,7 +130,7 @@ func devInit(instanceName string, keyFile string, ipString string) error {
 	instanceInfo.PublicKey = instancePublicKey
 	instanceInfo.Network = developmentNetwork.String()
 
-	err = envi.DB.SaveInstance(instanceInfo)
+	err = envi.DB.InsertInSet(instanceDS, instanceInfo)
 	if err != nil {
 		return errors.Wrapf(err, "Failed to save dev instance '%s'", instanceName)
 	}

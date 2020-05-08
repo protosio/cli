@@ -12,6 +12,8 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
+const cloudDS = "cloud"
+
 var cmdCloud *cli.Command = &cli.Command{
 	Name:  "cloud",
 	Usage: "Manage cloud providers",
@@ -71,7 +73,8 @@ var cmdCloud *cli.Command = &cli.Command{
 //
 
 func listCloudProviders() error {
-	clouds, err := envi.DB.GetAllClouds()
+	var clouds []cloud.ProviderInfo
+	err := envi.DB.GetSet(cloudDS, &clouds)
 	if err != nil {
 		return err
 	}
@@ -123,7 +126,7 @@ func addCloudProvider(cloudName string) (cloud.Provider, error) {
 
 	// save the cloud provider in the db
 	cloudProviderInfo := client.GetInfo()
-	err = envi.DB.SaveCloud(cloudProviderInfo)
+	err = envi.DB.InsertInSet(cloudDS, cloudProviderInfo)
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to save cloud provider info")
 	}
@@ -131,12 +134,35 @@ func addCloudProvider(cloudName string) (cloud.Provider, error) {
 	return client, nil
 }
 
+func getCloudProvider(name string) (cloud.ProviderInfo, error) {
+	clouds := []cloud.ProviderInfo{}
+	err := envi.DB.GetSet(cloudDS, &clouds)
+	if err != nil {
+		return cloud.ProviderInfo{}, err
+	}
+	for _, cld := range clouds {
+		if cld.Name == name {
+			return cld, nil
+		}
+	}
+	return cloud.ProviderInfo{}, fmt.Errorf("Could not find cloud provider '%s'", name)
+}
+
 func deleteCloudProvider(name string) error {
-	return envi.DB.DeleteCloud(name)
+	cld, err := getCloudProvider(name)
+	if err != nil {
+		return err
+	}
+	err = envi.DB.RemoveFromSet(cloudDS, cld)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func infoCloudProvider(name string) error {
-	cloud, err := envi.DB.GetCloud(name)
+	cloud, err := getCloudProvider(name)
 	if err != nil {
 		return errors.Wrapf(err, "Could not retrieve cloud '%s'", name)
 	}
